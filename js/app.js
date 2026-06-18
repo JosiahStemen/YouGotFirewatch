@@ -287,7 +287,7 @@ function renderGenerate() {
     </div>
     ${renderBackupCard('generate')}
     <div class="info-box mb-4">👥 <strong>One duty per person per month</strong> — you need at least as many duty-eligible Marines as days in the month (e.g. 31 for July). Harder days fill first; if short-staffed, Mon–Thu may show unassigned. Equal points is fine — ties pick fairly.</div>
-    <div class="info-box mb-4">📅 <strong>Assignment order:</strong> (1) Holidays & weekends → <span class="text-green">lowest-point</span> eligible Marines, (2) Fri then Mon–Thu → lowest-point still available, (3) <span class="text-gold">Supernumeraries last</span> → highest-point, fully available, not already on daily duty.</div>
+    <div class="info-box mb-4">📅 <strong>Assignment order:</strong> (1) Holidays & weekends → <span class="text-green">lowest-point</span> eligible Marines, (2) Fri then Mon–Thu → lowest-point still available, (3) <span class="text-gold">Supernumeraries last</span> → next-highest balances among Marines not on daily duty (different person per half).</div>
   `;
 
   if (!ui.generated) {
@@ -399,7 +399,7 @@ function renderSupernumeraries(roster, readOnly) {
   return `<div class="card card-gold mb-4">
     <div class="flex items-center gap-2 mb-4"><span class="text-gold" style="font-size:1.25rem">★</span>
       <h3 class="text-gold font-semibold">Supernumeraries</h3>
-      <span class="text-xs text-dim">Desirable backup — highest-point, fully-available personnel</span></div>
+      <span class="text-xs text-dim">Desirable backup — next-highest balance among Marines not on daily duty; different person each half</span></div>
     <div class="grid-2 gap-3">${roster.supernumeraries.map((sup) => {
       const range = getHalfDateRange(roster.year, roster.month, sup.half, state.settings.halfSplitDay);
       const person = sup.personId ? map.get(sup.personId) : null;
@@ -630,7 +630,7 @@ function assignSuper(half, personId) {
   if (personId) {
     const v = validateSupernumeraryAssignment(
       personId, half, personnelForRosterMonth(), ui.genYear, ui.genMonth,
-      state.settings.halfSplitDay, state.currentRoster.slots
+      state.settings.halfSplitDay, state.currentRoster.slots, state.currentRoster.supernumeraries
     );
     if (!v.valid) { alert(v.message); render(); return; }
   }
@@ -740,7 +740,7 @@ function showHelpModal() {
      <div class="card mb-3" style="padding:1rem"><strong>📅 Phase 1: Daily Duties (in order)</strong>
        <p class="text-sm text-muted mt-1"><strong>1.</strong> Holidays & weekends → <span class="text-green">lowest-point</span> eligible Marine per day. <strong>2.</strong> Friday, then Mon–Thu → lowest-point Marines still free. Non-availability and cooldown respected.</p></div>
      <div class="card mb-3" style="padding:1rem"><strong class="text-gold">★ Phase 2: Supernumeraries (last)</strong>
-       <p class="text-sm text-muted mt-1">After all daily slots are filled, two backup positions (1st/2nd half) go to the <span class="text-gold">highest-point Marine</span> fully available for that half who is <em>not</em> already on daily duty.</p></div>
+       <p class="text-sm text-muted mt-1">After daily duty, each half goes to a <em>different</em> Marine — the <span class="text-gold">next-highest point balance</span> among those fully available for that half and <em>not</em> already on the daily roster (uses pre-month points, not same-day duty bumps).</p></div>
      <div class="card mb-3" style="padding:1rem"><strong>📊 Points & Fairness</strong>
        <p class="text-sm text-muted mt-1">Points accumulate over months. Finalizing updates balances permanently. High-point people get easier assignments and supernumerary roles over time.</p></div>
      <div class="card" style="padding:1rem"><strong>✏ Calendar Editor</strong>

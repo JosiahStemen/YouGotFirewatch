@@ -205,7 +205,7 @@ ${roster.finalizedAt ? `<p style="font-size:12px;color:#999">Finalized: ${format
 <table><thead><tr><th>Half</th><th>Period</th><th>Assigned To</th><th>Points</th><th>Status</th></tr></thead><tbody>${superRows}</tbody></table>
 <h3>Daily Assignments</h3>
 <table><thead><tr><th>Date</th><th>Assigned To</th><th>Points</th><th>Note</th></tr></thead><tbody>${dailyRows}</tbody></table>
-<p class="footer">YouGotFireWatch: Daily duties to lowest-point eligible personnel. Supernumeraries reward highest-point fully-available personnel.</p>
+<p class="footer">YouGotFireWatch: Daily duties to lowest-point eligible personnel. Supernumeraries go to the next-highest balances among Marines not on daily duty (different person per half).</p>
 <script>window.onload=function(){window.print();}</script>
 </body></html>`;
 

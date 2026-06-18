@@ -6,8 +6,9 @@
  *   2. Friday, then Mon–Thu — lowest-point eligible among those still free
  *
  * Phase 2 (last):
- *   Supernumeraries — highest-point Marine fully available for the half,
- *   excluding anyone already assigned daily duty that month.
+ *   Supernumeraries — among Marines not on daily duty, pick the next-highest
+ *   pre-month point balances (not inflated by this month's daily assignments).
+ *   1st- and 2nd-half supers must be different people.
  */
 
 import {
@@ -78,8 +79,10 @@ function sortSlotsForAssignment(slots, year) {
   });
 }
 
-function compareSupernumeraryCandidates(a, b) {
-  if (a.points !== b.points) return b.points - a.points;
+function compareSupernumeraryCandidates(a, b, startPoints) {
+  const aPts = startPoints.get(a.id) ?? a.points;
+  const bPts = startPoints.get(b.id) ?? b.points;
+  if (aPts !== bPts) return bPts - aPts;
   const aLast = a.lastDutyDate || '';
   const bLast = b.lastDutyDate || '';
   if (aLast !== bLast) return aLast.localeCompare(bLast);
@@ -160,28 +163,42 @@ function assignDailyDuties(slots, tempState, cooldownDays, year) {
   return { slots: assigned, unassigned, warnings, assignedPersonIds: assignedThisMonth };
 }
 
-function assignSupernumeraries(supers, tempState, year, month, splitDay, assignedDailyIds) {
+function assignSupernumeraries(supers, tempState, year, month, splitDay, assignedDailyIds, startPoints) {
   const warnings = [];
   const result = supers.map((s) => ({ ...s }));
+  const assignedSuperIds = new Set(
+    result.filter((s) => s.personId).map((s) => s.personId)
+  );
 
-  for (const sup of result) {
-    if (sup.personId) continue;
+  const halfOrder = ['first', 'second'];
+  for (const half of halfOrder) {
+    const sup = result.find((s) => s.half === half);
+    if (!sup || sup.personId) continue;
+
     const range = getHalfDateRange(year, month, sup.half, splitDay);
     const available = tempState.filter((p) =>
       isFullyAvailableInRange(p, range.start, range.end) &&
-      !assignedDailyIds.has(p.id)
+      !assignedDailyIds.has(p.id) &&
+      !assignedSuperIds.has(p.id)
     );
+
     if (!available.length) {
       sup.unfilled = true;
-      warnings.push(`No fully available person for ${sup.half}-half supernumerary (${range.start} to ${range.end}) who is not already on daily duty.`);
+      warnings.push(
+        `No eligible Marine for ${sup.half}-half supernumerary (${range.start} to ${range.end}) — must be fully available, not on daily duty, and not the other half's super.`
+      );
       continue;
     }
-    available.sort(compareSupernumeraryCandidates);
+
+    available.sort((a, b) => compareSupernumeraryCandidates(a, b, startPoints));
     sup.personId = available[0].id;
     sup.unfilled = false;
+    assignedSuperIds.add(sup.personId);
+
     const pIdx = tempState.findIndex((p) => p.id === sup.personId);
     if (pIdx >= 0) tempState[pIdx].points += sup.pointsAwarded;
   }
+
   return { supers: result, warnings };
 }
 
@@ -228,6 +245,7 @@ export function generateRoster(year, month, personnel, settings, existingRoster,
   }
 
   const tempState = clonePersonState(personnel);
+  const startPoints = new Map(personnel.map((p) => [p.id, p.points]));
 
   if (keepManual) {
     for (const slot of slots) {
@@ -244,7 +262,7 @@ export function generateRoster(year, month, personnel, settings, existingRoster,
 
   const daily = assignDailyDuties(slots, tempState, settings.cooldownDays, year);
   const superResult = assignSupernumeraries(
-    supernumeraries, tempState, year, month, settings.halfSplitDay, daily.assignedPersonIds
+    supernumeraries, tempState, year, month, settings.halfSplitDay, daily.assignedPersonIds, startPoints
   );
 
   if (daily.unassigned.length) {
@@ -290,11 +308,16 @@ export function validateDailyAssignment(personId, date, slots, personnel) {
   return { valid: true, message: '' };
 }
 
-export function validateSupernumeraryAssignment(personId, half, personnel, year, month, splitDay, slots) {
+export function validateSupernumeraryAssignment(personId, half, personnel, year, month, splitDay, slots, supernumeraries) {
   const person = personnel.find((p) => p.id === personId);
   if (!person) return { valid: false, message: 'Person not found.' };
   if (slots?.some((s) => s.personId === personId)) {
     return { valid: false, message: `${person.rank} ${person.name} is already assigned daily duty this month. Supernumeraries go to Marines not on the daily roster.` };
+  }
+  const otherHalf = supernumeraries?.find((s) => s.half !== half && s.personId === personId);
+  if (otherHalf) {
+    const label = otherHalf.half === 'first' ? '1st' : '2nd';
+    return { valid: false, message: `${person.rank} ${person.name} is already supernumerary for the ${label} half. Each half must be a different person.` };
   }
   const range = getHalfDateRange(year, month, half, splitDay);
   const conflict = person.nonAvailability.some((na) => na.start <= range.end && range.start <= na.end);
