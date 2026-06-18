@@ -9,6 +9,7 @@ import {
   createMonthSlots, generateRoster, validateSupernumeraryAssignment,
   validateDailyAssignment, computePointDistribution, finalizeRoster,
   resetSlotsToBaseline, applyWeekendHolidayDefaults, applyBulkUpdate,
+  countDutyEligiblePersonnel,
 } from './rosterGenerator.js';
 import {
   exportRosterCSV, openCSVInNewTab, openFinalizePrintout, printRosterPDF,
@@ -269,17 +270,23 @@ function renderGenerate() {
   const isFinalized = roster?.finalized;
   const years = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 1 + i);
 
+  const resolvedForMonth = resolvePersonnelForMonth(state.personnel, ui.genYear, ui.genMonth);
+  const monthDays = resolvedForMonth.length ? new Date(ui.genYear, ui.genMonth, 0).getDate() : 0;
+  const dutyEligible = countDutyEligiblePersonnel(resolvedForMonth, ui.genYear, ui.genMonth);
+  const staffingOk = dutyEligible >= monthDays;
+
   let html = `
     <div class="flex flex-wrap justify-between items-center gap-4 mb-4">
       <div><h2 style="font-size:1.25rem;font-weight:600">Generate Roster</h2>
-        <p class="text-sm text-muted">Configure hardship points, then generate a fair two-phase assignment</p></div>
+        <p class="text-sm text-muted">Configure hardship points, then generate a fair two-phase assignment</p>
+        <p class="text-sm ${staffingOk ? 'text-olive' : 'text-amber'} mt-1">${dutyEligible} duty-eligible / ${monthDays} days this month${staffingOk ? ' — staffing OK' : ' — short-staffed; weekdays may not fill'}</p></div>
       <div class="flex gap-2">
         <select class="input w-auto" data-action="set-month">${Array.from({length:12},(_,i)=>`<option value="${i+1}" ${ui.genMonth===i+1?'selected':''}>${new Date(2000,i).toLocaleString('en',{month:'long'})}</option>`).join('')}</select>
         <select class="input w-auto" data-action="set-year">${years.map((y)=>`<option value="${y}" ${ui.genYear===y?'selected':''}>${y}</option>`).join('')}</select>
       </div>
     </div>
     ${renderBackupCard('generate')}
-    <div class="info-box mb-4">👥 <strong>One duty per person per month</strong> — with 30+ personnel, nobody stands daily duty twice. Supernumerary roles are separate backup positions.</div>
+    <div class="info-box mb-4">👥 <strong>One duty per person per month</strong> — you need at least as many duty-eligible Marines as days in the month (e.g. 31 for July). Harder days fill first; if short-staffed, Mon–Thu may show unassigned. Equal points is fine — ties pick fairly.</div>
     <div class="info-box mb-4">📅 <strong>Two-Phase Logic:</strong> Phase 1 assigns daily duties to the <span class="text-green">lowest-point eligible</span> person (hardest days first). Phase 2 assigns supernumeraries to the <span class="text-gold">highest-point fully-available</span> person in each half.</div>
   `;
 

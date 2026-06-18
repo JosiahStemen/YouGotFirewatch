@@ -26,6 +26,34 @@ function isFullyAvailableInRange(person, rangeStart, rangeEnd) {
   return !person.nonAvailability.some((na) => na.start <= rangeEnd && rangeStart <= na.end);
 }
 
+function isUnavailableAllMonth(person, year, month) {
+  const days = getMonthDays(year, month);
+  if (!days.length) return false;
+  const monthStart = toISODate(days[0]);
+  const monthEnd = toISODate(days[days.length - 1]);
+  return person.nonAvailability.some((na) => na.start <= monthStart && na.end >= monthEnd);
+}
+
+function countDutyEligiblePersonnel(personnel, year, month) {
+  return personnel.filter((p) => !isUnavailableAllMonth(p, year, month)).length;
+}
+
+function compareEligibleCandidates(a, b) {
+  if (a.points !== b.points) return a.points - b.points;
+  const aLast = a.lastDutyDate || '';
+  const bLast = b.lastDutyDate || '';
+  if (aLast !== bLast) return aLast.localeCompare(bLast);
+  return a.id.localeCompare(b.id);
+}
+
+function findEligibleForSlot(tempState, slotDate, assignedThisMonth, cooldownDays, { ignoreCooldown = false } = {}) {
+  return tempState.filter((p) =>
+    isAvailableOnDate(p, slotDate) &&
+    (ignoreCooldown || isCooldownSatisfied(p.lastDutyDate, slotDate, cooldownDays)) &&
+    !assignedThisMonth.has(p.id)
+  );
+}
+
 export function createMonthSlots(year, month, settings, existingSlots) {
   const days = getMonthDays(year, month);
   const holidays = getUSFederalHolidays(year);
@@ -36,7 +64,7 @@ export function createMonthSlots(year, month, settings, existingSlots) {
     if (existing) return { ...existing };
     const dayIsHoliday = isHoliday(iso, holidays);
     const dayType = getDayType(iso, dayIsHoliday);
-    const points = settings.baselines[dayType];
+    const points = settings.baselines[dayType] ?? 1;
     return { id: generateId(), date: iso, points, note: dayIsHoliday ? 'Federal holiday' : undefined, personId: null };
   });
 }
@@ -50,7 +78,7 @@ export function createEmptySupernumeraries(settings) {
 
 function assignDailyDuties(slots, tempState, cooldownDays) {
   const warnings = [], unassigned = [];
-  const sorted = [...slots].sort((a, b) => b.points - a.points);
+  const sorted = [...slots].sort((a, b) => (b.points ?? 0) - (a.points ?? 0) || a.date.localeCompare(b.date));
   const assigned = slots.map((s) => ({ ...s, personId: s.personId ?? null }));
 
   // Each person stands daily duty at most once per month (requires enough personnel).
@@ -62,29 +90,38 @@ function assignDailyDuties(slots, tempState, cooldownDays) {
   for (const slot of sorted) {
     if (slot.personId) continue;
 
-    const eligible = tempState.filter((p) =>
-      isAvailableOnDate(p, slot.date) &&
-      isCooldownSatisfied(p.lastDutyDate, slot.date, cooldownDays) &&
-      !assignedThisMonth.has(p.id)
-    );
+    let eligible = findEligibleForSlot(tempState, slot.date, assignedThisMonth, cooldownDays);
+    let usedCooldownFallback = false;
+
+    if (!eligible.length) {
+      eligible = findEligibleForSlot(tempState, slot.date, assignedThisMonth, cooldownDays, { ignoreCooldown: true });
+      usedCooldownFallback = eligible.length > 0;
+    }
 
     if (!eligible.length) {
       unassigned.push(slot.date);
+      const pts = slot.points ?? 0;
       warnings.push(
-        `No eligible person for ${slot.date} (${slot.points} pts) who has not already stood duty this month. Manual assignment required.`
+        `No eligible person for ${slot.date} (${pts} pts) who has not already stood duty this month. Manual assignment required.`
       );
       continue;
     }
 
-    eligible.sort((a, b) => a.points - b.points);
+    eligible.sort(compareEligibleCandidates);
     const chosen = eligible[0];
     assignedThisMonth.add(chosen.id);
+
+    if (usedCooldownFallback) {
+      warnings.push(
+        `Assigned ${slot.date} without cooldown gap — all other eligible Marines already have duty this month or are unavailable.`
+      );
+    }
 
     const idx = assigned.findIndex((s) => s.date === slot.date);
     if (idx >= 0) assigned[idx] = { ...assigned[idx], personId: chosen.id };
     const pIdx = tempState.findIndex((p) => p.id === chosen.id);
     if (pIdx >= 0) {
-      tempState[pIdx].points += slot.points;
+      tempState[pIdx].points += slot.points ?? 0;
       tempState[pIdx].lastDutyDate = slot.date;
     }
   }
@@ -125,10 +162,14 @@ export function generateRoster(year, month, personnel, settings, existingRoster,
   personnel = resolvePersonnelForMonth(personnel, year, month);
 
   const monthDayCount = getMonthDays(year, month).length;
+  const dutyEligibleCount = countDutyEligiblePersonnel(personnel, year, month);
   const rosterWarnings = [];
-  if (personnel.length < monthDayCount) {
+  if (dutyEligibleCount < monthDayCount) {
+    const blocked = personnel.length - dutyEligibleCount;
     rosterWarnings.push(
-      `Only ${personnel.length} personnel for ${monthDayCount} duty days. Each person may only stand duty once — some days may be unassigned.`
+      `Only ${dutyEligibleCount} duty-eligible Marine${dutyEligibleCount !== 1 ? 's' : ''} for ${monthDayCount} days in this month (one duty per person).` +
+      (blocked ? ` ${blocked} marked unavailable for the full month (non_availability = all).` : '') +
+      ' Harder days (weekends, holidays) are assigned first — Mon–Thu weekdays are often left unassigned when short-staffed. Equal points does not cause this.'
     );
   }
 
@@ -169,6 +210,15 @@ export function generateRoster(year, month, personnel, settings, existingRoster,
   const daily = assignDailyDuties(slots, tempState, settings.cooldownDays);
   const superResult = assignSupernumeraries(supernumeraries, tempState, year, month, settings.halfSplitDay);
 
+  if (daily.unassigned.length) {
+    const unassignedWeekdays = daily.unassigned.filter((date) => getDayType(date, isHoliday(date, getUSFederalHolidays(year))) === 'weekday');
+    if (unassignedWeekdays.length) {
+      rosterWarnings.push(
+        `${unassignedWeekdays.length} Mon–Thu weekday${unassignedWeekdays.length !== 1 ? 's' : ''} unassigned — add more personnel or reduce full-month non_availability (all).`
+      );
+    }
+  }
+
   return {
     roster: {
       id: existingRoster?.id ?? generateId(),
@@ -182,6 +232,8 @@ export function generateRoster(year, month, personnel, settings, existingRoster,
     unassignedSlots: daily.unassigned,
   };
 }
+
+export { countDutyEligiblePersonnel };
 
 export function validateDailyAssignment(personId, date, slots, personnel) {
   if (!personId) return { valid: true, message: '' };
