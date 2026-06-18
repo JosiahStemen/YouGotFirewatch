@@ -11,7 +11,7 @@ import {
   resetSlotsToBaseline, applyWeekendHolidayDefaults, applyBulkUpdate,
 } from './rosterGenerator.js';
 import {
-  exportRosterCSV, openCSVInNewTab, exportMonthlyDutyRosterSimple, printRosterPDF,
+  exportRosterCSV, openCSVInNewTab, openFinalizePrintout, printRosterPDF,
 } from './export.js';
 import {
   exportPersonnelBackup, parsePersonnelBackupCSV, getPersonnelBackupTemplate,
@@ -79,7 +79,7 @@ function renderBackupCard(context = 'generate') {
       <button class="btn btn-secondary btn-sm" data-action="backup-template">Download Template</button>
     </div>
     <p class="text-xs text-dim">${count} personnel loaded. Backup includes names, points, last duty date, and non-availability.</p>
-    ${context === 'generate' ? '<p class="text-xs text-gold mt-2">After finalize, two CSV files open in new tabs: monthly roster + updated personnel points.</p>' : ''}
+    ${context === 'generate' ? '<p class="text-xs text-gold mt-2">After finalize, a printable roster opens in a new tab (print dialog + personnel CSV).</p>' : ''}
   </div>`;
 }
 
@@ -645,14 +645,20 @@ function doFinalize() {
   state.currentRoster = finalized;
   closeModal(); persist();
 
-  const dutyRoster = exportMonthlyDutyRosterSimple(finalized, state.personnel);
+  // Open both windows immediately (same click — avoids pop-up blocker).
+  const printed = openFinalizePrintout(finalized, state.personnel, state.settings);
   const personnelBackup = exportPersonnelBackup(state.personnel, state.settings);
-  openCSVInNewTab(dutyRoster.content, dutyRoster.filename);
-  setTimeout(() => {
-    openCSVInNewTab(personnelBackup.content, personnelBackup.filename);
-  }, 400);
+  const csvOpened = openCSVInNewTab(personnelBackup.content, personnelBackup.filename);
 
-  toast('Finalized! Two CSV files opened in new tabs.');
+  if (printed && csvOpened) {
+    toast('Finalized! Roster printout + personnel CSV opened in new windows.');
+  } else if (printed) {
+    toast('Roster opened. Allow pop-ups for personnel CSV too.');
+  } else if (csvOpened) {
+    toast('Personnel CSV opened. Allow pop-ups for the printable roster.');
+  } else {
+    toast('Finalized! Allow pop-ups, then use Export buttons in History.');
+  }
   render();
 }
 
@@ -710,9 +716,7 @@ function applyBulk() {
 function showFinalizeModal() {
   openModal('Finalize Roster',
     `<p class="text-sm text-muted mb-3">Finalizing permanently updates all personnel points and last duty dates. The roster is saved to History and locked.</p>
-     <p class="text-sm text-muted mb-3">Two CSV files will open in <strong>new tabs</strong> (your app stays open):<br>
-       1. Monthly duty roster (Date + Rank/Last Name)<br>
-       2. Updated personnel list with new points</p>
+     <p class="text-sm text-muted mb-3">A <strong>printable monthly roster</strong> opens in a new tab (print dialog appears automatically), plus an updated personnel CSV. Allow pop-ups if prompted.</p>
      <p class="text-sm text-amber">Verify all assignments before confirming.</p>`,
     `<button class="btn btn-secondary" data-action="close-modal">Cancel</button>
      <button class="btn btn-primary" data-action="confirm-finalize">🔒 Confirm Finalize</button>`, 'sm');
