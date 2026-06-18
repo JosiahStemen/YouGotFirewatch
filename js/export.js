@@ -1,0 +1,97 @@
+import { formatMonthYear, formatDisplayDate, getHalfDateRange } from './dateUtils.js';
+
+export function exportRosterCSV(roster, personnel, settings) {
+  const map = new Map(personnel.map((p) => [p.id, p]));
+  const lines = [`Unit,${settings.unitName}`, `Month,${formatMonthYear(roster.month, roster.year)}`, '', 'Date,Day,Rank,Name,Points,Note'];
+  for (const slot of [...roster.slots].sort((a, b) => a.date.localeCompare(b.date))) {
+    const person = slot.personId ? map.get(slot.personId) : null;
+    lines.push([slot.date, new Date(slot.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short' }), person?.rank ?? 'UNASSIGNED', person?.name ?? '', slot.points, `"${(slot.note || '').replace(/"/g, '""')}"`].join(','));
+  }
+  lines.push('', 'Supernumeraries', 'Half,Rank,Name,Points,Status,Note');
+  for (const sup of roster.supernumeraries) {
+    const person = sup.personId ? map.get(sup.personId) : null;
+    const range = getHalfDateRange(roster.year, roster.month, sup.half, settings.halfSplitDay);
+    lines.push([`${sup.half} (${range.start} to ${range.end})`, person?.rank ?? 'UNFILLED', person?.name ?? '', sup.pointsAwarded, sup.unfilled ? 'UNFILLED' : 'ASSIGNED', `"${(sup.note || '').replace(/"/g, '""')}"`].join(','));
+  }
+  return lines.join('\n');
+}
+
+export function downloadFile(content, filename, mime) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+export function printRosterPDF(roster, personnel, settings) {
+  const map = new Map(personnel.map((p) => [p.id, p]));
+  const monthLabel = formatMonthYear(roster.month, roster.year);
+  const sorted = [...roster.slots].sort((a, b) => a.date.localeCompare(b.date));
+
+  let superRows = roster.supernumeraries.map((sup) => {
+    const person = sup.personId ? map.get(sup.personId) : null;
+    const range = getHalfDateRange(roster.year, roster.month, sup.half, settings.halfSplitDay);
+    return `<tr><td>${sup.half === 'first' ? '1st Half' : '2nd Half'}</td><td>${range.start} – ${range.end}</td><td>${person ? person.rank + ' ' + person.name : 'UNFILLED'}</td><td>${sup.pointsAwarded}</td><td>${sup.unfilled ? 'Needs Assignment' : 'Assigned'}</td></tr>`;
+  }).join('');
+
+  let dailyRows = sorted.map((slot) => {
+    const person = slot.personId ? map.get(slot.personId) : null;
+    const day = new Date(slot.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    return `<tr><td>${day}</td><td>${person ? person.rank + ' ' + person.name : 'UNASSIGNED'}</td><td>${slot.points}</td><td>${slot.note || ''}</td></tr>`;
+  }).join('');
+
+  const html = `<!DOCTYPE html><html><head><title>YouGotFireWatch ${monthLabel}</title>
+<style>
+  body { font-family: Arial, sans-serif; margin: 40px; color: #1a2332; }
+  h1 { color: #1a2332; margin-bottom: 4px; } h2 { color: #666; font-weight: normal; font-size: 16px; }
+  h3 { color: #1a2332; border-bottom: 2px solid #c9a227; padding-bottom: 4px; margin-top: 24px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px; }
+  th { background: #1a2332; color: #c9a227; padding: 8px; text-align: left; }
+  td { padding: 6px 8px; border-bottom: 1px solid #ddd; }
+  tr:nth-child(even) { background: #f5f5f5; }
+  .footer { margin-top: 24px; font-size: 10px; color: #999; }
+  @media print { body { margin: 20px; } }
+</style></head><body>
+<h1>${settings.unitName}</h1>
+<h2>Duty Roster — ${monthLabel}</h2>
+${roster.finalizedAt ? `<p style="font-size:12px;color:#999">Finalized: ${formatDisplayDate(roster.finalizedAt.split('T')[0])}</p>` : ''}
+<h3>Supernumeraries (Desirable Backup Positions)</h3>
+<table><thead><tr><th>Half</th><th>Period</th><th>Assigned To</th><th>Points</th><th>Status</th></tr></thead><tbody>${superRows}</tbody></table>
+<h3>Daily Assignments</h3>
+<table><thead><tr><th>Date</th><th>Assigned To</th><th>Points</th><th>Note</th></tr></thead><tbody>${dailyRows}</tbody></table>
+<p class="footer">YouGotFireWatch: Daily duties to lowest-point eligible personnel. Supernumeraries reward highest-point fully-available personnel.</p>
+<script>window.onload=function(){window.print();}</script>
+</body></html>`;
+
+  const win = window.open('', '_blank');
+  if (win) { win.document.write(html); win.document.close(); }
+  else alert('Pop-up blocked. Allow pop-ups to print/export PDF.');
+}
+
+export function parsePersonnelCSV(text) {
+  const lines = text.trim().split('\n');
+  if (lines.length < 2) return [];
+  const headers = lines[0].split(',').map((h) => h.trim().toLowerCase());
+  return lines.slice(1).filter((l) => l.trim()).map((line) => {
+    const vals = line.split(',').map((v) => v.trim());
+    const row = {};
+    headers.forEach((h, i) => { row[h] = vals[i] || ''; });
+    if (!row.name || !row.rank) return null;
+    return {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+      rank: row.rank, name: row.name,
+      points: parseInt(row.points, 10) || 0,
+      lastDutyDate: null,
+      section: row.section || undefined,
+      notes: row.notes || undefined,
+      nonAvailability: [],
+    };
+  }).filter(Boolean);
+}
+
+export function getPersonnelCSVTemplate() {
+  return 'rank,name,points,section,notes\nSSgt,Martinez J.,12,Admin,\nSgt,Thompson R.,18,Operations,\nCpl,Williams K.,8,Supply,';
+}

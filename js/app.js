@@ -1,0 +1,743 @@
+import { DEFAULT_SETTINGS, loadAppState, saveAppState, exportAppData, importAppData, clearAllData } from './storage.js';
+import { createSamplePersonnel } from './sampleData.js';
+import {
+  formatMonthYear, formatShortDate, fullDayName, getCalendarGridOffset,
+  generateId, getHalfDateRange,
+} from './dateUtils.js';
+import { getHolidayName } from './holidays.js';
+import {
+  createMonthSlots, generateRoster, validateSupernumeraryAssignment,
+  computePointDistribution, finalizeRoster, resetSlotsToBaseline,
+  applyWeekendHolidayDefaults, applyBulkUpdate,
+} from './rosterGenerator.js';
+import {
+  exportRosterCSV, downloadFile, printRosterPDF,
+} from './export.js';
+import {
+  exportPersonnelBackup, parsePersonnelBackupCSV, getPersonnelBackupTemplate,
+} from './personnelBackup.js';
+
+// ─── State ───────────────────────────────────────────────────────────────────
+let state = {
+  personnel: [],
+  settings: { ...DEFAULT_SETTINGS },
+  currentRoster: null,
+  history: [],
+  activeTab: 'personnel',
+};
+
+let ui = {
+  modal: null,
+  editingPerson: null,
+  showPersonForm: false,
+  search: '',
+  genYear: new Date().getFullYear(),
+  genMonth: new Date().getMonth() + 1,
+  slots: [],
+  generated: false,
+  warnings: [],
+  keepManual: false,
+  viewingHistory: null,
+  settingsDraft: null,
+};
+
+function persist() { saveAppState(state); }
+
+function init() {
+  const saved = loadAppState();
+  if (saved) {
+    state = { ...state, ...saved };
+  } else {
+    state.personnel = createSamplePersonnel();
+  }
+  ui.settingsDraft = { ...state.settings, baselines: { ...state.settings.baselines } };
+  ui.slots = createMonthSlots(ui.genYear, ui.genMonth, state.settings);
+  render();
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+function esc(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function ptsBadge(pts, max = 10) {
+  const r = Math.round(34 + Math.min(pts / max, 1) * 200);
+  const g = Math.round(180 - Math.min(pts / max, 1) * 140);
+  const b = Math.round(90 - Math.min(pts / max, 1) * 60);
+  const label = Number.isInteger(pts) ? `${pts}pt${pts !== 1 ? 's' : ''}` : `${pts}pts`;
+  return `<span class="pts-badge" style="background:rgba(${r},${g},${b},0.2);color:rgb(${r},${g},${b});border-color:rgba(${r},${g},${b},0.4)">${label}</span>`;
+}
+
+function personMap() { return new Map(state.personnel.map((p) => [p.id, p])); }
+
+function renderBackupCard(context = 'generate') {
+  const count = state.personnel.length;
+  return `<div class="card" style="border-color:rgba(107,124,62,0.4);background:rgba(107,124,62,0.05)">
+    <h3 class="font-semibold text-olive mb-2">📁 Personnel Backup (CSV)</h3>
+    <p class="text-sm text-muted mb-3">Keep a CSV file on your shared drive or desktop. Import before generating; export after finalizing so someone can cover for you.</p>
+    <div class="flex flex-wrap gap-2 mb-3">
+      <button class="btn btn-primary btn-sm" data-action="import-personnel-backup">⬆ Import Backup (Replace All)</button>
+      <button class="btn btn-secondary btn-sm" data-action="export-personnel-backup">⬇ Export Personnel Backup</button>
+      <button class="btn btn-secondary btn-sm" data-action="backup-template">Download Template</button>
+    </div>
+    <p class="text-xs text-dim">${count} personnel loaded. Backup includes names, points, last duty date, and non-availability.</p>
+    ${context === 'generate' ? '<p class="text-xs text-gold mt-2">After you finalize a roster, an updated backup downloads automatically.</p>' : ''}
+  </div>`;
+}
+
+function downloadPersonnelBackup() {
+  const backup = exportPersonnelBackup(state.personnel, state.settings);
+  downloadFile(backup.content, backup.filename, 'text/csv');
+  return backup.filename;
+}
+
+function importPersonnelBackup(text) {
+  const result = parsePersonnelBackupCSV(text);
+  if (result.error) { alert(result.error); return false; }
+  const msg = state.personnel.length
+    ? `Replace all ${state.personnel.length} current personnel with ${result.personnel.length} from this backup?`
+    : `Load ${result.personnel.length} personnel from backup?`;
+  if (!confirm(msg)) return false;
+  state.personnel = result.personnel;
+  persist();
+  if (result.errors?.length) alert('Some rows were skipped:\n' + result.errors.join('\n'));
+  toast(`Loaded ${result.personnel.length} personnel from backup`);
+  render();
+  return true;
+}
+
+function toast(msg) {
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 2500);
+}
+
+function openModal(title, body, footer = '', size = '') {
+  ui.modal = { title, body, footer, size };
+  render();
+}
+
+function closeModal() { ui.modal = null; render(); }
+
+// ─── Render ──────────────────────────────────────────────────────────────────
+function render() {
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <header class="header">
+      <div class="header-brand">
+        <div class="header-logo">🛡</div>
+        <div><h1>YouGotFireWatch</h1><div class="unit-name">${esc(state.settings.unitName)}</div></div>
+      </div>
+      <button class="btn btn-secondary btn-sm" data-action="show-help">❓ How It Works</button>
+    </header>
+    <nav class="tabs">
+      ${['personnel','generate','history','settings'].map((t) =>
+        `<button class="tab-btn ${state.activeTab === t ? 'active' : ''}" data-action="tab" data-tab="${t}">${
+          {personnel:'👥 Personnel',generate:'📅 Generate Roster',history:'📋 History',settings:'⚙️ Settings'}[t]
+        }</button>`
+      ).join('')}
+    </nav>
+    <main class="main">${renderTab()}</main>
+    <footer class="footer">YouGotFireWatch — Fair fire watch roster generator. All data stored locally in your browser.</footer>
+    ${ui.modal ? renderModal() : ''}
+  `;
+}
+
+function renderModal() {
+  const m = ui.modal;
+  return `<div class="modal-overlay" data-action="close-modal-overlay">
+    <div class="modal ${m.size}">
+      <div class="modal-header"><h2>${esc(m.title)}</h2><button type="button" class="modal-close" data-action="close-modal" aria-label="Close">✕</button></div>
+      <div class="modal-body">${m.body}${m.footer ? `<div class="modal-footer">${m.footer}</div>` : ''}</div>
+    </div>
+  </div>`;
+}
+
+function renderTab() {
+  switch (state.activeTab) {
+    case 'personnel': return renderPersonnel();
+    case 'generate': return renderGenerate();
+    case 'history': return renderHistory();
+    case 'settings': return renderSettings();
+    default: return '';
+  }
+}
+
+// ─── Personnel Tab ───────────────────────────────────────────────────────────
+function renderPersonnel() {
+  if (!state.personnel.length && !ui.showPersonForm) {
+    return `<div class="empty-state"><div class="empty-icon">👥</div><h3>No Personnel Yet</h3>
+      <p>Add unit members manually, import CSV, or load sample data.</p>
+      <div class="flex gap-3 justify-center"><button class="btn btn-primary" data-action="show-person-form">Add Person</button>
+      <button class="btn btn-secondary" data-action="load-sample">Load Sample Data</button></div></div>`;
+  }
+
+  const filtered = state.personnel.filter((p) =>
+    !ui.search || p.name.toLowerCase().includes(ui.search.toLowerCase()) ||
+    p.rank.toLowerCase().includes(ui.search.toLowerCase()) ||
+    (p.section || '').toLowerCase().includes(ui.search.toLowerCase())
+  );
+
+  return `
+    <div class="flex flex-wrap justify-between items-center gap-4 mb-4">
+      <div><h2 style="font-size:1.25rem;font-weight:600">Personnel</h2>
+        <p class="text-sm text-muted">${state.personnel.length} member${state.personnel.length !== 1 ? 's' : ''}</p></div>
+      <div class="flex flex-wrap gap-2">
+        <button class="btn btn-primary btn-sm" data-action="show-person-form">+ Add Person</button>
+        <button class="btn btn-secondary btn-sm" data-action="import-personnel-backup">Import Backup</button>
+        <button class="btn btn-secondary btn-sm" data-action="export-personnel-backup">Export Backup</button>
+        <button class="btn btn-secondary btn-sm" data-action="backup-template">Template</button>
+        <button class="btn btn-secondary btn-sm" data-action="load-sample">Load Sample</button>
+      </div>
+    </div>
+    ${renderBackupCard('personnel')}
+    <input class="input mb-4" style="max-width:20rem" placeholder="Search..." value="${esc(ui.search)}" data-action="search-personnel">
+    ${ui.showPersonForm ? renderPersonForm() : ''}
+    <div class="grid-3">${filtered.map((p) => renderPersonCard(p)).join('')}</div>
+    ${!filtered.length && ui.search ? '<p class="text-center text-dim">No matches.</p>' : ''}
+  `;
+}
+
+function renderPersonCard(p) {
+  return `<div class="card person-card">
+    <div class="flex justify-between mb-3">
+      <div><span class="person-rank">${esc(p.rank)}</span><h3>${esc(p.name)}</h3>${p.section ? `<span class="text-xs text-dim">${esc(p.section)}</span>` : ''}</div>
+      <div class="flex gap-2">
+        <button class="btn btn-secondary btn-sm" data-action="edit-person" data-id="${p.id}">Edit</button>
+        <button class="btn btn-danger btn-sm" data-action="delete-person" data-id="${p.id}">Del</button>
+      </div>
+    </div>
+    <div class="flex gap-4 text-sm">
+      <div><span class="text-dim">Points</span><div class="person-points">${p.points}</div></div>
+      <div><span class="text-dim">Last Duty</span><div>${p.lastDutyDate ? formatShortDate(p.lastDutyDate) : 'Never'}</div></div>
+    </div>
+    ${p.nonAvailability.length ? `<div class="na-badge">⚠ Non-Available: ${p.nonAvailability.map((na) => `${formatShortDate(na.start)}–${formatShortDate(na.end)}${na.reason ? ' ('+esc(na.reason)+')' : ''}`).join('; ')}</div>` : ''}
+    ${p.notes ? `<p class="text-xs text-dim mt-2" style="font-style:italic">${esc(p.notes)}</p>` : ''}
+  </div>`;
+}
+
+function renderPersonForm() {
+  const p = ui.editingPerson;
+  const nas = p?.nonAvailability || [];
+  return `<form class="card mb-4" data-action="save-person">
+    <h3 class="mb-4 font-semibold">${p ? 'Edit' : 'Add'} Person</h3>
+    <div class="grid-4 gap-3 mb-3">
+      <div><label class="label">Rank</label><input class="input" name="rank" value="${esc(p?.rank)}" required></div>
+      <div style="grid-column:span 2"><label class="label">Name</label><input class="input" name="name" value="${esc(p?.name)}" required></div>
+      <div><label class="label">Points</label><input class="input" type="number" name="points" value="${p?.points ?? 0}" min="0"></div>
+      <div><label class="label">Section</label><input class="input" name="section" value="${esc(p?.section)}"></div>
+      <div style="grid-column:span 3"><label class="label">Notes</label><input class="input" name="notes" value="${esc(p?.notes)}"></div>
+    </div>
+    <div class="mb-3"><div class="flex justify-between mb-2"><label class="label" style="margin:0">Non-Availability</label>
+      <button type="button" class="text-sm text-gold" data-action="add-na">+ Add Period</button></div>
+      <div id="na-fields">${nas.map((na, i) => renderNAFields(na, i)).join('')}</div>
+      ${!nas.length ? '<p class="text-sm text-dim">None set.</p>' : ''}
+    </div>
+    <div class="flex gap-3 justify-end">
+      <button type="button" class="btn btn-secondary" data-action="cancel-person-form">Cancel</button>
+      <button type="submit" class="btn btn-primary">${p ? 'Update' : 'Add'} Person</button>
+    </div>
+  </form>`;
+}
+
+function renderNAFields(na, i) {
+  return `<div class="flex gap-2 mb-2 items-end" data-na-idx="${i}">
+    <div style="flex:1"><label class="label">Start</label><input class="input" name="na_start_${i}" type="date" value="${na.start}"></div>
+    <div style="flex:1"><label class="label">End</label><input class="input" name="na_end_${i}" type="date" value="${na.end}"></div>
+    <div style="flex:1"><label class="label">Reason</label><input class="input" name="na_reason_${i}" value="${esc(na.reason)}" placeholder="96 liberty, TDY..."></div>
+    <button type="button" class="btn btn-danger btn-sm" data-action="remove-na" data-idx="${i}">✕</button>
+  </div>`;
+}
+
+// ─── Generate Tab ────────────────────────────────────────────────────────────
+function renderGenerate() {
+  if (!state.personnel.length) {
+    return `<div class="empty-state"><div class="empty-icon">👥</div><h3>Add Personnel First</h3>
+      <p>At least one person is needed before generating a roster.</p>
+      <button class="btn btn-primary" data-action="tab" data-tab="personnel">Go to Personnel</button></div>`;
+  }
+
+  const roster = state.currentRoster;
+  const isFinalized = roster?.finalized;
+  const years = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 1 + i);
+
+  let html = `
+    <div class="flex flex-wrap justify-between items-center gap-4 mb-4">
+      <div><h2 style="font-size:1.25rem;font-weight:600">Generate Roster</h2>
+        <p class="text-sm text-muted">Configure hardship points, then generate a fair two-phase assignment</p></div>
+      <div class="flex gap-2">
+        <select class="input w-auto" data-action="set-month">${Array.from({length:12},(_,i)=>`<option value="${i+1}" ${ui.genMonth===i+1?'selected':''}>${new Date(2000,i).toLocaleString('en',{month:'long'})}</option>`).join('')}</select>
+        <select class="input w-auto" data-action="set-year">${years.map((y)=>`<option value="${y}" ${ui.genYear===y?'selected':''}>${y}</option>`).join('')}</select>
+      </div>
+    </div>
+    ${renderBackupCard('generate')}
+    <div class="info-box mb-4">📅 <strong>Two-Phase Logic:</strong> Phase 1 assigns daily duties to the <span class="text-green">lowest-point eligible</span> person (hardest days first). Phase 2 assigns supernumeraries to the <span class="text-gold">highest-point fully-available</span> person in each half.</div>
+  `;
+
+  if (!ui.generated) {
+    html += `<div class="card"><h3 class="mb-4 font-semibold">Calendar Editor — ${formatMonthYear(ui.genMonth, ui.genYear)}</h3>
+      ${renderCalendar(ui.slots, false)}</div>
+      <div class="text-center mt-4"><button class="btn btn-primary btn-lg" data-action="generate">⚡ Generate Fair Roster</button></div>`;
+  } else if (roster) {
+    if (ui.warnings.length) {
+      html += `<div class="card card-amber"><strong class="text-amber">⚠ Assignment Warnings</strong><ul class="text-sm mt-2">${ui.warnings.map((w)=>`<li>• ${esc(w)}</li>`).join('')}</ul></div>`;
+    }
+    if (!isFinalized) {
+      html += `<div class="card"><h3 class="text-sm font-semibold text-muted mb-3">Adjust Points Before Re-generating</h3>${renderCalendar(ui.slots, false)}</div>`;
+    }
+    html += renderRosterResults(roster, isFinalized);
+    if (!isFinalized) {
+      html += `<div class="flex flex-wrap justify-center gap-3 mt-4 items-center">
+        <label class="text-sm text-muted"><input type="checkbox" data-action="toggle-keep-manual" ${ui.keepManual?'checked':''}> Keep manual assignments on re-generate</label>
+        <button class="btn btn-secondary" data-action="generate">🔄 Re-generate</button>
+        <button class="btn btn-primary" data-action="show-finalize">🔒 Finalize Roster</button>
+      </div>`;
+    } else {
+      html += `<p class="text-center text-olive mt-4">✓ Finalized — points and duty dates updated.</p>`;
+    }
+  }
+  return html;
+}
+
+function renderCalendar(slots, showAssignments) {
+  const maxPts = Math.max(...slots.map((s) => s.points), 10);
+  const offset = getCalendarGridOffset(ui.genYear, ui.genMonth);
+  const map = personMap();
+  const cells = [...Array(offset).fill(null), ...slots];
+  while (cells.length % 7) cells.push(null);
+
+  return `
+    ${!showAssignments ? `<div class="cal-tools">
+      <button class="btn btn-secondary btn-sm" data-action="toggle-baselines">✏ Baselines</button>
+      <button class="btn btn-secondary btn-sm" data-action="weekend-defaults">☀ Weekend/Holiday Defaults</button>
+      <button class="btn btn-secondary btn-sm" data-action="reset-baseline">↺ Reset All</button>
+      <button class="btn btn-secondary btn-sm" data-action="show-bulk">📆 Bulk Edit Range</button>
+    </div>
+    <div id="baselines-panel" class="hidden card mb-3 grid-5">
+      ${[{key:'weekday',label:'M–Thu'},{key:'friday',label:'Friday'},{key:'saturday',label:'Saturday'},{key:'sunday',label:'Sunday'},{key:'holiday',label:'Holiday'}].map(({key,label})=>`<div><label class="label">${label}</label>
+        <input class="input" type="number" step="0.5" data-action="set-baseline" data-key="${key}" value="${state.settings.baselines[key]}" min="0"></div>`).join('')}
+    </div>` : ''}
+    <div class="cal-grid">
+      ${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((d)=>`<div class="cal-dow">${d}</div>`).join('')}
+      ${cells.map((slot) => {
+        if (!slot) return '<div class="cal-day empty"></div>';
+        const dayNum = parseInt(slot.date.split('-')[2], 10);
+        const holiday = getHolidayName(slot.date);
+        const assigned = showAssignments && slot.personId ? map.get(slot.personId) : null;
+        return `<button class="cal-day ${slot.note?'has-note':''} ${assigned?'assigned':''}" data-action="edit-day" data-date="${slot.date}" ${showAssignments?'disabled style="cursor:default"':''}>
+          <div class="flex justify-between"><span class="cal-day-num">${dayNum}</span>${ptsBadge(slot.points, maxPts)}</div>
+          ${holiday ? `<span class="text-xs text-gold" style="font-size:0.6rem">${holiday}</span>` : ''}
+          ${slot.note && !holiday ? `<span class="cal-day-note">${esc(slot.note)}</span>` : ''}
+          ${assigned ? `<span class="cal-day-person">${esc(assigned.rank)} ${esc(assigned.name.split(',')[0])}</span>` : ''}
+        </button>`;
+      }).join('')}
+    </div>
+    <div class="cal-legend">
+      <span><span class="legend-dot" style="background:rgba(74,222,128,0.3);border:1px solid rgba(74,222,128,0.5)"></span>Low pts (desirable)</span>
+      <span><span class="legend-dot" style="background:rgba(248,113,113,0.3);border:1px solid rgba(248,113,113,0.5)"></span>High pts (hardship)</span>
+      <span>${slots.length} days — full coverage required</span>
+    </div>`;
+}
+
+function renderRosterResults(roster, readOnly) {
+  const map = personMap();
+  const maxPts = Math.max(...roster.slots.map((s) => s.points), 10);
+  const sorted = [...roster.slots].sort((a, b) => a.date.localeCompare(b.date));
+  const dist = computePointDistribution(roster, state.personnel);
+
+  return `
+    <div class="flex justify-between items-center mb-4">
+      <h3 class="font-semibold">Roster Results</h3>
+      <div class="flex gap-2">
+        <button class="btn btn-secondary btn-sm" data-action="export-pdf">📄 Print/PDF</button>
+        <button class="btn btn-secondary btn-sm" data-action="export-csv">📊 Export CSV</button>
+      </div>
+    </div>
+    ${renderSupernumeraries(roster, readOnly)}
+    <div class="card"><h4 class="text-sm font-semibold text-muted mb-3">Daily Assignments</h4>
+      <div class="table-wrap"><table class="data"><thead><tr><th>Date</th><th>Assigned To</th><th>Points</th><th>Note</th>${!readOnly?'<th>Reassign</th>':''}</tr></thead><tbody>
+        ${sorted.map((slot) => {
+          const person = slot.personId ? map.get(slot.personId) : null;
+          return `<tr><td>${fullDayName(slot.date)}</td>
+            <td>${person ? esc(person.rank)+' '+esc(person.name) : '<span class="text-amber">Unassigned</span>'}</td>
+            <td>${ptsBadge(slot.points, maxPts)}</td><td class="text-xs text-dim">${esc(slot.note)}</td>
+            ${!readOnly ? `<td><select class="input" style="width:auto;font-size:0.75rem" data-action="reassign" data-date="${slot.date}">
+              <option value="">Unassigned</option>${state.personnel.map((p)=>`<option value="${p.id}" ${slot.personId===p.id?'selected':''}>${esc(p.rank)} ${esc(p.name)}</option>`).join('')}
+            </select></td>` : ''}</tr>`;
+        }).join('')}
+      </tbody></table></div>
+    </div>
+    <div class="card"><h4 class="text-sm font-semibold text-muted mb-3">Visual Calendar</h4>
+      ${renderCalendar(roster.slots, true)}</div>
+    <div class="card"><h4 class="text-sm font-semibold text-muted mb-3">Point Distribution Preview</h4>
+      <div class="table-wrap"><table class="data"><thead><tr><th>Person</th><th>Current</th><th>Projected</th><th>Duties</th><th>Super</th></tr></thead><tbody>
+        ${dist.map((d)=>`<tr><td>${esc(d.rank)} ${esc(d.name)}</td><td class="font-mono text-dim">${d.currentPoints}</td>
+          <td class="font-mono font-semibold">${d.projectedPoints}${d.projectedPoints>d.currentPoints?` <span class="text-amber text-xs">(+${d.projectedPoints-d.currentPoints})</span>`:''}</td>
+          <td class="text-dim">${d.dutiesAssigned}</td><td>${d.isSupernumerary?'<span class="text-gold text-xs">★ Super</span>':''}</td></tr>`).join('')}
+      </tbody></table></div>
+    </div>`;
+}
+
+function renderSupernumeraries(roster, readOnly) {
+  const map = personMap();
+  return `<div class="card card-gold mb-4">
+    <div class="flex items-center gap-2 mb-4"><span class="text-gold" style="font-size:1.25rem">★</span>
+      <h3 class="text-gold font-semibold">Supernumeraries</h3>
+      <span class="text-xs text-dim">Desirable backup — highest-point, fully-available personnel</span></div>
+    <div class="grid-2 gap-3">${roster.supernumeraries.map((sup) => {
+      const range = getHalfDateRange(roster.year, roster.month, sup.half, state.settings.halfSplitDay);
+      const person = sup.personId ? map.get(sup.personId) : null;
+      const halfLabel = sup.half === 'first' ? '1st Half' : '2nd Half';
+      return `<div class="super-card ${sup.unfilled?'unfilled':'filled'}">
+        <div class="flex justify-between mb-2">
+          <div><span class="font-semibold">${halfLabel}</span>
+            <p class="text-xs text-dim">Days ${sup.half==='first'?`1–${state.settings.halfSplitDay}`:`${state.settings.halfSplitDay+1}–end`} (${formatShortDate(range.start)} – ${formatShortDate(range.end)})</p></div>
+          <span class="text-xs ${sup.unfilled?'text-amber':'text-olive'}">${sup.unfilled?'⚠ Unfilled':'✓ Assigned'}</span>
+        </div>
+        ${person ? `<p class="font-semibold">${esc(person.rank)} ${esc(person.name)}</p>
+          <p class="text-xs text-dim">Points: ${person.points} → +${sup.pointsAwarded} super pts</p>
+          ${!readOnly ? `<select class="input mt-2" style="font-size:0.8125rem" data-action="assign-super" data-half="${sup.half}">
+            <option value="">Unassign</option>${state.personnel.map((p)=>`<option value="${p.id}" ${sup.personId===p.id?'selected':''}>${esc(p.rank)} ${esc(p.name)} (${p.points} pts)</option>`).join('')}
+          </select>` : ''}` :
+          (!readOnly ? `<p class="text-sm text-amber mb-2">No fully available person. Assign manually:</p>
+            <select class="input" style="font-size:0.8125rem" data-action="assign-super" data-half="${sup.half}">
+              <option value="">Select person...</option>${state.personnel.map((p)=>`<option value="${p.id}">${esc(p.rank)} ${esc(p.name)} (${p.points} pts)</option>`).join('')}
+            </select>` : '<p class="text-amber">Unfilled</p>')}
+      </div>`;
+    }).join('')}</div></div>`;
+}
+
+// ─── History Tab ─────────────────────────────────────────────────────────────
+function renderHistory() {
+  if (ui.viewingHistory) {
+    return `<button class="btn btn-secondary btn-sm mb-4" data-action="back-history">← Back</button>
+      ${renderRosterResults(ui.viewingHistory, true)}`;
+  }
+  const sorted = [...state.history].sort((a, b) => b.year - a.year || b.month - a.month);
+  if (!sorted.length) {
+    return `<div class="empty-state"><div class="empty-icon">📋</div><h3>No Roster History</h3>
+      <p>Finalized rosters will appear here.</p></div>`;
+  }
+  return `<div class="mb-4"><h2 style="font-size:1.25rem;font-weight:600">Roster History</h2>
+    <p class="text-sm text-muted">${sorted.length} finalized roster${sorted.length!==1?'s':''}</p></div>
+    <div class="grid-3">${sorted.map((r) => {
+      const assigned = r.slots.filter((s) => s.personId).length;
+      const supers = r.supernumeraries.filter((s) => s.personId).length;
+      return `<div class="card"><div class="flex justify-between mb-3">
+        <h3 class="font-semibold">${formatMonthYear(r.month, r.year)}</h3><span class="text-xs text-olive">Finalized</span></div>
+        <div class="grid-3 text-sm mb-3"><div><span class="text-dim text-xs">Days</span><p class="font-mono">${assigned}/${r.slots.length}</p></div>
+          <div><span class="text-dim text-xs">Supers</span><p class="font-mono">${supers}/2</p></div>
+          <div><span class="text-dim text-xs">Total Pts</span><p class="font-mono">${r.slots.reduce((s,x)=>s+x.points,0)}</p></div></div>
+        ${r.finalizedAt ? `<p class="text-xs text-dim mb-3">Finalized ${new Date(r.finalizedAt).toLocaleDateString()}</p>` : ''}
+        <div class="flex gap-2">
+          <button class="btn btn-secondary btn-sm" style="flex:1" data-action="view-history" data-id="${r.id}">View</button>
+          <button class="btn btn-secondary btn-sm" data-action="print-history" data-id="${r.id}">📄</button>
+        </div></div>`;
+    }).join('')}</div>`;
+}
+
+// ─── Settings Tab ────────────────────────────────────────────────────────────
+function renderSettings() {
+  const s = ui.settingsDraft;
+  return `
+    <div class="mb-4"><h2 style="font-size:1.25rem;font-weight:600">Settings</h2>
+      <p class="text-sm text-muted">Configure defaults for roster generation and exports</p></div>
+    <div class="card mb-4"><h3 class="text-sm font-semibold text-muted mb-3">Unit Information</h3>
+      <label class="label">Unit Name (PDF exports)</label>
+      <input class="input" data-action="settings-field" data-field="unitName" value="${esc(s.unitName)}"></div>
+    <div class="card mb-4"><h3 class="text-sm font-semibold text-muted mb-3">Assignment Rules</h3>
+      <div class="grid-3 gap-3">
+        <div><label class="label">Cooldown Days</label><input class="input" type="number" data-action="settings-field" data-field="cooldownDays" value="${s.cooldownDays}" min="0">
+          <p class="hint">Min days between duties for same person</p></div>
+        <div><label class="label">Half Split Day</label><input class="input" type="number" data-action="settings-field" data-field="halfSplitDay" value="${s.halfSplitDay}" min="1" max="28">
+          <p class="hint">Day splitting 1st/2nd half (default: 15)</p></div>
+        <div><label class="label">Supernumerary Points</label><input class="input" type="number" data-action="settings-field" data-field="supernumeraryPoints" value="${s.supernumeraryPoints}" min="0">
+          <p class="hint">Low value — desirable position</p></div>
+      </div></div>
+    <div class="card mb-4"><h3 class="text-sm font-semibold text-muted mb-3">Default Baseline Points</h3>
+      <div class="grid-3 gap-3">${[{key:'weekday',label:'M–Thu'},{key:'friday',label:'Friday'},{key:'saturday',label:'Saturday'},{key:'sunday',label:'Sunday'},{key:'holiday',label:'Holiday'}].map(({key,label})=>
+        `<div><label class="label">${label}</label><input class="input" type="number" step="0.5" data-action="settings-baseline" data-key="${key}" value="${s.baselines[key]}" min="0"></div>`
+      ).join('')}</div></div>
+    <button class="btn btn-primary mb-4" data-action="save-settings">💾 Save Settings</button>
+    ${renderBackupCard('settings')}
+    <div class="card"><h3 class="text-sm font-semibold text-muted mb-3">Advanced</h3>
+      <div class="flex flex-wrap gap-3">
+        <button class="btn btn-danger btn-sm" data-action="show-reset">Reset All Data</button>
+      </div>
+      <p class="text-xs text-dim mt-2">Reset clears browser data only. Your CSV backup files are not affected.</p>
+    </div>`;
+}
+
+// ─── Event Handling ──────────────────────────────────────────────────────────
+document.addEventListener('click', handleClick);
+document.addEventListener('change', handleChange);
+document.addEventListener('input', handleInput);
+document.addEventListener('submit', handleSubmit);
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && ui.modal) closeModal();
+});
+
+function handleClick(e) {
+  const el = e.target.closest('[data-action]');
+  if (!el) return;
+  const action = el.dataset.action;
+
+  switch (action) {
+    case 'tab': state.activeTab = el.dataset.tab; render(); break;
+    case 'show-help': showHelpModal(); break;
+    case 'close-modal': closeModal(); break;
+    case 'close-modal-overlay':
+      if (e.target === el) closeModal();
+      break;
+    case 'show-person-form': ui.showPersonForm = true; ui.editingPerson = null; render(); break;
+    case 'cancel-person-form': ui.showPersonForm = false; ui.editingPerson = null; render(); break;
+    case 'edit-person': ui.editingPerson = state.personnel.find((p) => p.id === el.dataset.id); ui.showPersonForm = true; render(); break;
+    case 'delete-person':
+      if (confirm('Delete this person?')) { state.personnel = state.personnel.filter((p) => p.id !== el.dataset.id); persist(); render(); }
+      break;
+    case 'load-sample': state.personnel = createSamplePersonnel(); persist(); toast('Sample data loaded'); render(); break;
+    case 'import-personnel-backup': triggerFileImport('.csv', (text) => importPersonnelBackup(text)); break;
+    case 'export-personnel-backup': { const f = downloadPersonnelBackup(); toast(`Downloaded ${f}`); break; }
+    case 'backup-template': downloadFile(getPersonnelBackupTemplate(), 'YouGotFireWatch-Personnel-Backup-Template.csv', 'text/csv'); break;
+    case 'add-na':
+      if (!ui.editingPerson) ui.editingPerson = { nonAvailability: [] };
+      ui.editingPerson.nonAvailability = [...(ui.editingPerson.nonAvailability || []), { start: '', end: '', reason: '' }];
+      render(); break;
+    case 'remove-na': {
+      const idx = parseInt(el.dataset.idx, 10);
+      ui.editingPerson.nonAvailability.splice(idx, 1);
+      render(); break;
+    }
+    case 'generate': doGenerate(); break;
+    case 'toggle-baselines': document.getElementById('baselines-panel')?.classList.toggle('hidden'); break;
+    case 'weekend-defaults': ui.slots = applyWeekendHolidayDefaults(ui.slots, state.settings, ui.genYear); syncSlots(); render(); break;
+    case 'reset-baseline': ui.slots = resetSlotsToBaseline(ui.slots, state.settings, ui.genYear); syncSlots(); render(); break;
+    case 'show-bulk': showBulkModal(); break;
+    case 'edit-day': showDayModal(el.dataset.date); break;
+    case 'show-finalize': showFinalizeModal(); break;
+    case 'confirm-finalize': doFinalize(); break;
+    case 'export-pdf': if (state.currentRoster) printRosterPDF(state.currentRoster, state.personnel, state.settings); break;
+    case 'export-csv': if (state.currentRoster) downloadFile(exportRosterCSV(state.currentRoster, state.personnel, state.settings), `YouGotFireWatch-${ui.genYear}-${String(ui.genMonth).padStart(2,'0')}.csv`, 'text/csv'); break;
+    case 'back-history': ui.viewingHistory = null; render(); break;
+    case 'view-history': ui.viewingHistory = state.history.find((h) => h.id === el.dataset.id); render(); break;
+    case 'print-history': { const r = state.history.find((h) => h.id === el.dataset.id); if (r) printRosterPDF(r, state.personnel, state.settings); break; }
+    case 'save-settings': saveSettings(); break;
+    case 'show-reset': showResetModal(); break;
+    case 'confirm-reset': clearAllData(); state = { personnel: createSamplePersonnel(), settings: { ...DEFAULT_SETTINGS }, currentRoster: null, history: [], activeTab: 'settings' }; ui.settingsDraft = { ...state.settings, baselines: { ...state.settings.baselines } }; closeModal(); toast('Data reset'); render(); break;
+    case 'apply-bulk': applyBulk(); break;
+    case 'save-day': saveDayEdit(); break;
+  }
+}
+
+function handleChange(e) {
+  const el = e.target;
+  const action = el.dataset?.action;
+  if (action === 'set-month') { changeMonth(parseInt(el.value, 10), ui.genYear); }
+  else if (action === 'set-year') { changeMonth(ui.genMonth, parseInt(el.value, 10)); }
+  else if (action === 'toggle-keep-manual') { ui.keepManual = el.checked; }
+  else if (action === 'reassign') { reassignSlot(el.dataset.date, el.value || null); }
+  else if (action === 'assign-super') { assignSuper(el.dataset.half, el.value || null); }
+  else if (action === 'set-baseline') {
+    state.settings.baselines[el.dataset.key] = parseFloat(el.value) || 0;
+    persist();
+  }
+}
+
+function handleInput(e) {
+  const el = e.target;
+  if (el.dataset?.action === 'search-personnel') { ui.search = el.value; render(); }
+  else if (el.dataset?.action === 'settings-field') {
+    const field = el.dataset.field;
+    ui.settingsDraft[field] = el.type === 'number' ? parseInt(el.value, 10) || 0 : el.value;
+  }
+  else if (el.dataset?.action === 'settings-baseline') {
+    ui.settingsDraft.baselines[el.dataset.key] = parseFloat(el.value) || 0;
+  }
+}
+
+function handleSubmit(e) {
+  e.preventDefault();
+  if (e.target.dataset?.action === 'save-person') savePerson(e.target);
+}
+
+function savePerson(form) {
+  const fd = new FormData(form);
+  const nas = [];
+  let i = 0;
+  while (fd.has(`na_start_${i}`)) {
+    const start = fd.get(`na_start_${i}`);
+    const end = fd.get(`na_end_${i}`);
+    if (start && end) nas.push({ start, end, reason: fd.get(`na_reason_${i}`) || undefined });
+    i++;
+  }
+  const person = {
+    id: ui.editingPerson?.id || generateId(),
+    rank: fd.get('rank').trim(),
+    name: fd.get('name').trim(),
+    points: parseInt(fd.get('points'), 10) || 0,
+    lastDutyDate: ui.editingPerson?.lastDutyDate || null,
+    section: fd.get('section')?.trim() || undefined,
+    notes: fd.get('notes')?.trim() || undefined,
+    nonAvailability: nas,
+  };
+  if (ui.editingPerson) {
+    const idx = state.personnel.findIndex((p) => p.id === person.id);
+    if (idx >= 0) state.personnel[idx] = person;
+  } else {
+    state.personnel.push(person);
+  }
+  ui.showPersonForm = false; ui.editingPerson = null;
+  persist(); toast('Person saved'); render();
+}
+
+function changeMonth(month, year) {
+  ui.genMonth = month; ui.genYear = year; ui.generated = false; ui.warnings = [];
+  const existing = state.history.find((h) => h.month === month && h.year === year);
+  if (existing) { state.currentRoster = existing; ui.slots = existing.slots; ui.generated = true; }
+  else { state.currentRoster = null; ui.slots = createMonthSlots(year, month, state.settings); }
+  persist(); render();
+}
+
+function syncSlots() {
+  if (state.currentRoster) state.currentRoster = { ...state.currentRoster, slots: ui.slots };
+  persist();
+}
+
+function doGenerate() {
+  const result = generateRoster(ui.genYear, ui.genMonth, state.personnel, state.settings, state.currentRoster, ui.keepManual, ui.slots);
+  state.currentRoster = result.roster;
+  ui.slots = result.roster.slots;
+  ui.warnings = result.warnings;
+  ui.generated = true;
+  persist(); render();
+}
+
+function reassignSlot(date, personId) {
+  if (!state.currentRoster) return;
+  state.currentRoster.slots = state.currentRoster.slots.map((s) => s.date === date ? { ...s, personId } : s);
+  ui.slots = state.currentRoster.slots;
+  persist(); render();
+}
+
+function assignSuper(half, personId) {
+  if (!state.currentRoster) return;
+  if (personId) {
+    const v = validateSupernumeraryAssignment(personId, half, state.personnel, ui.genYear, ui.genMonth, state.settings.halfSplitDay);
+    if (!v.valid) { alert(v.message); render(); return; }
+  }
+  state.currentRoster.supernumeraries = state.currentRoster.supernumeraries.map((s) =>
+    s.half === half ? { ...s, personId, unfilled: !personId } : s
+  );
+  persist(); render();
+}
+
+function doFinalize() {
+  if (!state.currentRoster) return;
+  state.personnel = finalizeRoster(state.currentRoster, state.personnel, state.settings.halfSplitDay);
+  const finalized = { ...state.currentRoster, finalized: true, finalizedAt: new Date().toISOString() };
+  const idx = state.history.findIndex((h) => h.month === finalized.month && h.year === finalized.year);
+  if (idx >= 0) state.history[idx] = finalized; else state.history.push(finalized);
+  state.currentRoster = finalized;
+  closeModal(); persist();
+  const filename = downloadPersonnelBackup();
+  toast(`Finalized! Backup saved: ${filename}`);
+  render();
+}
+
+function saveSettings() {
+  state.settings = { ...ui.settingsDraft, baselines: { ...ui.settingsDraft.baselines } };
+  persist(); toast('Settings saved'); render();
+}
+
+function showDayModal(date) {
+  const slot = ui.slots.find((s) => s.date === date);
+  if (!slot) return;
+  openModal(`Edit ${fullDayName(date)}`,
+    `<div class="mb-3"><label class="label">Points Value</label>
+      <input class="input" id="day-pts" type="number" step="0.5" value="${slot.points}" min="0">
+      <p class="hint">Higher = more hardship. Adjust for 96s, holidays, surge periods.</p></div>
+      <div><label class="label">Note</label>
+      <input class="input" id="day-note" value="${esc(slot.note)}" placeholder="e.g., during 96 liberty"></div>`,
+    `<button class="btn btn-secondary" data-action="close-modal">Cancel</button>
+     <button class="btn btn-primary" data-action="save-day" data-date="${date}">Save</button>`,
+    'sm'
+  );
+  ui._editDate = date;
+}
+
+function saveDayEdit() {
+  const pts = parseFloat(document.getElementById('day-pts')?.value) || 0;
+  const note = document.getElementById('day-note')?.value || '';
+  ui.slots = ui.slots.map((s) => s.date === ui._editDate ? { ...s, points: pts, note: note || undefined } : s);
+  syncSlots(); closeModal(); render();
+}
+
+function showBulkModal() {
+  openModal('Bulk Edit Date Range',
+    `<p class="text-sm text-muted mb-3">Perfect for 96-hour liberty periods or known event blocks.</p>
+     <div class="grid-2 gap-3 mb-3">
+       <div><label class="label">Start Date</label><input class="input" id="bulk-start" type="date"></div>
+       <div><label class="label">End Date</label><input class="input" id="bulk-end" type="date"></div>
+     </div>
+     <div class="mb-3"><label class="label">Points Value</label><input class="input" id="bulk-pts" type="number" step="0.5" value="1" min="0"></div>
+     <div><label class="label">Note</label><input class="input" id="bulk-note" placeholder="e.g., 96-hour liberty period"></div>`,
+    `<button class="btn btn-secondary" data-action="close-modal">Cancel</button>
+     <button class="btn btn-primary" data-action="apply-bulk">Apply to Range</button>`, 'sm');
+}
+
+function applyBulk() {
+  const start = document.getElementById('bulk-start')?.value;
+  const end = document.getElementById('bulk-end')?.value;
+  if (!start || !end) return;
+  const pts = parseFloat(document.getElementById('bulk-pts')?.value);
+  const note = document.getElementById('bulk-note')?.value;
+  ui.slots = applyBulkUpdate(ui.slots, start, end, { points: pts, note: note || undefined });
+  syncSlots(); closeModal(); render();
+}
+
+function showFinalizeModal() {
+  openModal('Finalize Roster',
+    `<p class="text-sm text-muted mb-3">Finalizing permanently updates all personnel points and last duty dates. The roster is saved to History and locked.</p>
+     <p class="text-sm text-muted mb-3">An updated <strong>Personnel Backup CSV</strong> will download automatically — save it to your shared drive to hand off duties or recover if browser data is lost.</p>
+     <p class="text-sm text-amber">Verify all assignments before confirming.</p>`,
+    `<button class="btn btn-secondary" data-action="close-modal">Cancel</button>
+     <button class="btn btn-primary" data-action="confirm-finalize">🔒 Confirm Finalize</button>`, 'sm');
+}
+
+function showResetModal() {
+  openModal('Reset All Data',
+    `<p class="text-sm text-amber mb-2">⚠ This deletes everything and loads sample data.</p>
+     <p class="text-sm text-muted">All personnel, rosters, history, and settings will be permanently deleted.</p>`,
+    `<button class="btn btn-secondary" data-action="close-modal">Cancel</button>
+     <button class="btn btn-danger" data-action="confirm-reset">Reset Everything</button>`, 'sm');
+}
+
+function showHelpModal() {
+  openModal('How YouGotFireWatch Works',
+    `<p class="text-sm text-muted mb-4">YouGotFireWatch generates fair monthly fire watch rosters using a two-phase algorithm. Every day gets one person; two supernumerary positions reward those who've carried the most duty.</p>
+     <div class="card mb-3" style="padding:1rem"><strong>📅 Phase 1: Daily Duties</strong>
+       <p class="text-sm text-muted mt-1">Days sorted by hardship (highest first). Each day goes to the <span class="text-green">eligible person with the lowest current points</span>. Non-availability and cooldown respected.</p></div>
+     <div class="card mb-3" style="padding:1rem"><strong class="text-gold">★ Phase 2: Supernumeraries</strong>
+       <p class="text-sm text-muted mt-1">Two backup positions (1st/2nd half). Assigned to <span class="text-gold">highest-point personnel with zero non-availability</span> for their entire half. Low points = desirable reward.</p></div>
+     <div class="card mb-3" style="padding:1rem"><strong>📊 Points & Fairness</strong>
+       <p class="text-sm text-muted mt-1">Points accumulate over months. Finalizing updates balances permanently. High-point people get easier assignments and supernumerary roles over time.</p></div>
+     <div class="card" style="padding:1rem"><strong>✏ Calendar Editor</strong>
+       <p class="text-sm text-muted mt-1">Adjust points per day for 96s, holidays, and unit events. Bulk tools apply changes across date ranges.</p></div>`,
+    `<button class="btn btn-primary" data-action="close-modal" style="width:100%">Got It</button>`, 'lg');
+}
+
+function triggerFileImport(accept, callback) {
+  const input = document.createElement('input');
+  input.type = 'file'; input.accept = accept;
+  input.onchange = () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => callback(e.target.result);
+    reader.readAsText(file);
+  };
+  input.click();
+}
+
+// ─── Boot ────────────────────────────────────────────────────────────────────
+init();
