@@ -52,18 +52,33 @@ function assignDailyDuties(slots, tempState, cooldownDays) {
   const sorted = [...slots].sort((a, b) => b.points - a.points);
   const assigned = slots.map((s) => ({ ...s, personId: s.personId ?? null }));
 
+  // Each person stands daily duty at most once per month (requires enough personnel).
+  const assignedThisMonth = new Set();
+  for (const slot of assigned) {
+    if (slot.personId) assignedThisMonth.add(slot.personId);
+  }
+
   for (const slot of sorted) {
     if (slot.personId) continue;
+
     const eligible = tempState.filter((p) =>
-      isAvailableOnDate(p, slot.date) && isCooldownSatisfied(p.lastDutyDate, slot.date, cooldownDays)
+      isAvailableOnDate(p, slot.date) &&
+      isCooldownSatisfied(p.lastDutyDate, slot.date, cooldownDays) &&
+      !assignedThisMonth.has(p.id)
     );
+
     if (!eligible.length) {
       unassigned.push(slot.date);
-      warnings.push(`No eligible person for ${slot.date} (${slot.points} pts). Manual assignment required.`);
+      warnings.push(
+        `No eligible person for ${slot.date} (${slot.points} pts) who has not already stood duty this month. Manual assignment required.`
+      );
       continue;
     }
+
     eligible.sort((a, b) => a.points - b.points);
     const chosen = eligible[0];
+    assignedThisMonth.add(chosen.id);
+
     const idx = assigned.findIndex((s) => s.date === slot.date);
     if (idx >= 0) assigned[idx] = { ...assigned[idx], personId: chosen.id };
     const pIdx = tempState.findIndex((p) => p.id === chosen.id);
@@ -104,6 +119,14 @@ export function generateRoster(year, month, personnel, settings, existingRoster,
       warnings: ['No personnel available. Add personnel before generating.'],
       unassignedSlots: [],
     };
+  }
+
+  const monthDayCount = getMonthDays(year, month).length;
+  const rosterWarnings = [];
+  if (personnel.length < monthDayCount) {
+    rosterWarnings.push(
+      `Only ${personnel.length} personnel for ${monthDayCount} duty days. Each person may only stand duty once — some days may be unassigned.`
+    );
   }
 
   let slots = editedSlots ? editedSlots.map((s) => ({ ...s })) : createMonthSlots(year, month, settings, existingRoster?.slots);
@@ -152,9 +175,21 @@ export function generateRoster(year, month, personnel, settings, existingRoster,
       finalized: false,
       createdAt: existingRoster?.createdAt ?? new Date().toISOString(),
     },
-    warnings: [...daily.warnings, ...superResult.warnings],
+    warnings: [...rosterWarnings, ...daily.warnings, ...superResult.warnings],
     unassignedSlots: daily.unassigned,
   };
+}
+
+export function validateDailyAssignment(personId, date, slots) {
+  if (!personId) return { valid: true, message: '' };
+  const conflict = slots.find((s) => s.personId === personId && s.date !== date);
+  if (conflict) {
+    return {
+      valid: false,
+      message: `This person is already assigned on ${conflict.date}. Each member may only stand daily duty once per month.`,
+    };
+  }
+  return { valid: true, message: '' };
 }
 
 export function validateSupernumeraryAssignment(personId, half, personnel, year, month, splitDay) {

@@ -16,14 +16,57 @@ export function exportRosterCSV(roster, personnel, settings) {
   return lines.join('\n');
 }
 
+export function formatRankLastName(person) {
+  if (!person) return 'UNASSIGNED';
+  const lastName = person.name.includes(',') ? person.name.split(',')[0].trim() : person.name.trim();
+  return `${person.rank} ${lastName}`;
+}
+
+export function exportMonthlyDutyRosterSimple(roster, personnel) {
+  const map = new Map(personnel.map((p) => [p.id, p]));
+  const lines = ['Date,Rank and Last Name'];
+  for (const slot of [...roster.slots].sort((a, b) => a.date.localeCompare(b.date))) {
+    const person = slot.personId ? map.get(slot.personId) : null;
+    const label = formatRankLastName(person);
+    lines.push(`${slot.date},"${label.replace(/"/g, '""')}"`);
+  }
+  const filename = `YouGotFireWatch-Roster-${roster.year}-${String(roster.month).padStart(2, '0')}.csv`;
+  return { content: lines.join('\n'), filename };
+}
+
+/** Open CSV in a new tab so the main app stays open. */
+export function openCSVInNewTab(csvContent, filename) {
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const blobUrl = URL.createObjectURL(blob);
+  const win = window.open('', '_blank');
+  if (!win) {
+    alert('Pop-up blocked. Allow pop-ups to export CSV.');
+    URL.revokeObjectURL(blobUrl);
+    return false;
+  }
+  const safeName = filename.replace(/</g, '');
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${safeName}</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 24px; color: #1a2332; }
+  h1 { font-size: 1.1rem; margin-bottom: 6px; }
+  p { color: #666; font-size: 0.875rem; margin-bottom: 14px; }
+  a.dl { display: inline-block; padding: 8px 16px; background: #b8941f; color: #0a0f1a;
+    text-decoration: none; border-radius: 6px; font-weight: 600; margin-bottom: 16px; }
+  pre { background: #f4f4f5; padding: 16px; border-radius: 8px; overflow: auto; font-size: 13px; line-height: 1.5; }
+</style></head><body>
+<h1>${safeName}</h1>
+<p>Download the file below, then close this tab to return to YouGotFireWatch.</p>
+<a class="dl" href="${blobUrl}" download="${safeName}">Download CSV</a>
+<pre id="preview"></pre>
+<script>document.getElementById('preview').textContent = ${JSON.stringify(csvContent)};</script>
+</body></html>`);
+  win.document.close();
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 120000);
+  return true;
+}
+
 export function downloadFile(content, filename, mime) {
-  const blob = new Blob([content], { type: mime });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
+  openCSVInNewTab(content, filename);
 }
 
 export function printRosterPDF(roster, personnel, settings) {

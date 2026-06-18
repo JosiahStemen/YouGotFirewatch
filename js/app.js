@@ -7,11 +7,11 @@ import {
 import { getHolidayName } from './holidays.js';
 import {
   createMonthSlots, generateRoster, validateSupernumeraryAssignment,
-  computePointDistribution, finalizeRoster, resetSlotsToBaseline,
-  applyWeekendHolidayDefaults, applyBulkUpdate,
+  validateDailyAssignment, computePointDistribution, finalizeRoster,
+  resetSlotsToBaseline, applyWeekendHolidayDefaults, applyBulkUpdate,
 } from './rosterGenerator.js';
 import {
-  exportRosterCSV, downloadFile, printRosterPDF,
+  exportRosterCSV, openCSVInNewTab, exportMonthlyDutyRosterSimple, printRosterPDF,
 } from './export.js';
 import {
   exportPersonnelBackup, parsePersonnelBackupCSV, getPersonnelBackupTemplate,
@@ -79,13 +79,13 @@ function renderBackupCard(context = 'generate') {
       <button class="btn btn-secondary btn-sm" data-action="backup-template">Download Template</button>
     </div>
     <p class="text-xs text-dim">${count} personnel loaded. Backup includes names, points, last duty date, and non-availability.</p>
-    ${context === 'generate' ? '<p class="text-xs text-gold mt-2">After you finalize a roster, an updated backup downloads automatically.</p>' : ''}
+    ${context === 'generate' ? '<p class="text-xs text-gold mt-2">After finalize, two CSV files open in new tabs: monthly roster + updated personnel points.</p>' : ''}
   </div>`;
 }
 
-function downloadPersonnelBackup() {
+function openPersonnelBackupTab() {
   const backup = exportPersonnelBackup(state.personnel, state.settings);
-  downloadFile(backup.content, backup.filename, 'text/csv');
+  openCSVInNewTab(backup.content, backup.filename);
   return backup.filename;
 }
 
@@ -271,6 +271,7 @@ function renderGenerate() {
       </div>
     </div>
     ${renderBackupCard('generate')}
+    <div class="info-box mb-4">👥 <strong>One duty per person per month</strong> — with 30+ personnel, nobody stands daily duty twice. Supernumerary roles are separate backup positions.</div>
     <div class="info-box mb-4">📅 <strong>Two-Phase Logic:</strong> Phase 1 assigns daily duties to the <span class="text-green">lowest-point eligible</span> person (hardest days first). Phase 2 assigns supernumeraries to the <span class="text-gold">highest-point fully-available</span> person in each half.</div>
   `;
 
@@ -497,8 +498,8 @@ function handleClick(e) {
       break;
     case 'load-sample': state.personnel = createSamplePersonnel(); persist(); toast('Sample data loaded'); render(); break;
     case 'import-personnel-backup': triggerFileImport('.csv', (text) => importPersonnelBackup(text)); break;
-    case 'export-personnel-backup': { const f = downloadPersonnelBackup(); toast(`Downloaded ${f}`); break; }
-    case 'backup-template': downloadFile(getPersonnelBackupTemplate(), 'YouGotFireWatch-Personnel-Backup-Template.csv', 'text/csv'); break;
+    case 'export-personnel-backup': { const f = openPersonnelBackupTab(); toast(`Opened ${f} in new tab`); break; }
+    case 'backup-template': openCSVInNewTab(getPersonnelBackupTemplate(), 'YouGotFireWatch-Personnel-Backup-Template.csv'); break;
     case 'add-na':
       if (!ui.editingPerson) ui.editingPerson = { nonAvailability: [] };
       ui.editingPerson.nonAvailability = [...(ui.editingPerson.nonAvailability || []), { start: '', end: '', reason: '' }];
@@ -517,7 +518,7 @@ function handleClick(e) {
     case 'show-finalize': showFinalizeModal(); break;
     case 'confirm-finalize': doFinalize(); break;
     case 'export-pdf': if (state.currentRoster) printRosterPDF(state.currentRoster, state.personnel, state.settings); break;
-    case 'export-csv': if (state.currentRoster) downloadFile(exportRosterCSV(state.currentRoster, state.personnel, state.settings), `YouGotFireWatch-${ui.genYear}-${String(ui.genMonth).padStart(2,'0')}.csv`, 'text/csv'); break;
+    case 'export-csv': if (state.currentRoster) openCSVInNewTab(exportRosterCSV(state.currentRoster, state.personnel, state.settings), `YouGotFireWatch-Detail-${ui.genYear}-${String(ui.genMonth).padStart(2,'0')}.csv`); break;
     case 'back-history': ui.viewingHistory = null; render(); break;
     case 'view-history': ui.viewingHistory = state.history.find((h) => h.id === el.dataset.id); render(); break;
     case 'print-history': { const r = state.history.find((h) => h.id === el.dataset.id); if (r) printRosterPDF(r, state.personnel, state.settings); break; }
@@ -614,6 +615,10 @@ function doGenerate() {
 
 function reassignSlot(date, personId) {
   if (!state.currentRoster) return;
+  if (personId) {
+    const v = validateDailyAssignment(personId, date, state.currentRoster.slots);
+    if (!v.valid) { alert(v.message); render(); return; }
+  }
   state.currentRoster.slots = state.currentRoster.slots.map((s) => s.date === date ? { ...s, personId } : s);
   ui.slots = state.currentRoster.slots;
   persist(); render();
@@ -639,8 +644,15 @@ function doFinalize() {
   if (idx >= 0) state.history[idx] = finalized; else state.history.push(finalized);
   state.currentRoster = finalized;
   closeModal(); persist();
-  const filename = downloadPersonnelBackup();
-  toast(`Finalized! Backup saved: ${filename}`);
+
+  const dutyRoster = exportMonthlyDutyRosterSimple(finalized, state.personnel);
+  const personnelBackup = exportPersonnelBackup(state.personnel, state.settings);
+  openCSVInNewTab(dutyRoster.content, dutyRoster.filename);
+  setTimeout(() => {
+    openCSVInNewTab(personnelBackup.content, personnelBackup.filename);
+  }, 400);
+
+  toast('Finalized! Two CSV files opened in new tabs.');
   render();
 }
 
@@ -698,7 +710,9 @@ function applyBulk() {
 function showFinalizeModal() {
   openModal('Finalize Roster',
     `<p class="text-sm text-muted mb-3">Finalizing permanently updates all personnel points and last duty dates. The roster is saved to History and locked.</p>
-     <p class="text-sm text-muted mb-3">An updated <strong>Personnel Backup CSV</strong> will download automatically — save it to your shared drive to hand off duties or recover if browser data is lost.</p>
+     <p class="text-sm text-muted mb-3">Two CSV files will open in <strong>new tabs</strong> (your app stays open):<br>
+       1. Monthly duty roster (Date + Rank/Last Name)<br>
+       2. Updated personnel list with new points</p>
      <p class="text-sm text-amber">Verify all assignments before confirming.</p>`,
     `<button class="btn btn-secondary" data-action="close-modal">Cancel</button>
      <button class="btn btn-primary" data-action="confirm-finalize">🔒 Confirm Finalize</button>`, 'sm');
