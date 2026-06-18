@@ -287,7 +287,7 @@ function renderGenerate() {
     </div>
     ${renderBackupCard('generate')}
     <div class="info-box mb-4">👥 <strong>One duty per person per month</strong> — you need at least as many duty-eligible Marines as days in the month (e.g. 31 for July). Harder days fill first; if short-staffed, Mon–Thu may show unassigned. Equal points is fine — ties pick fairly.</div>
-    <div class="info-box mb-4">📅 <strong>Two-Phase Logic:</strong> Phase 1 assigns daily duties to the <span class="text-green">lowest-point eligible</span> person (hardest days first). Phase 2 assigns supernumeraries to the <span class="text-gold">highest-point fully-available</span> person in each half.</div>
+    <div class="info-box mb-4">📅 <strong>Assignment order:</strong> (1) Holidays & weekends → <span class="text-green">lowest-point</span> eligible Marines, (2) Fri then Mon–Thu → lowest-point still available, (3) <span class="text-gold">Supernumeraries last</span> → highest-point, fully available, not already on daily duty.</div>
   `;
 
   if (!ui.generated) {
@@ -628,7 +628,10 @@ function reassignSlot(date, personId) {
 function assignSuper(half, personId) {
   if (!state.currentRoster) return;
   if (personId) {
-    const v = validateSupernumeraryAssignment(personId, half, personnelForRosterMonth(), ui.genYear, ui.genMonth, state.settings.halfSplitDay);
+    const v = validateSupernumeraryAssignment(
+      personId, half, personnelForRosterMonth(), ui.genYear, ui.genMonth,
+      state.settings.halfSplitDay, state.currentRoster.slots
+    );
     if (!v.valid) { alert(v.message); render(); return; }
   }
   state.currentRoster.supernumeraries = state.currentRoster.supernumeraries.map((s) =>
@@ -734,10 +737,10 @@ function showResetModal() {
 function showHelpModal() {
   openModal('How YouGotFireWatch Works',
     `<p class="text-sm text-muted mb-4">YouGotFireWatch generates fair monthly fire watch rosters using a two-phase algorithm. Every day gets one person; two supernumerary positions reward those who've carried the most duty.</p>
-     <div class="card mb-3" style="padding:1rem"><strong>📅 Phase 1: Daily Duties</strong>
-       <p class="text-sm text-muted mt-1">Days sorted by hardship (highest first). Each day goes to the <span class="text-green">eligible person with the lowest current points</span>. Non-availability and cooldown respected.</p></div>
-     <div class="card mb-3" style="padding:1rem"><strong class="text-gold">★ Phase 2: Supernumeraries</strong>
-       <p class="text-sm text-muted mt-1">Two backup positions (1st/2nd half). Assigned to <span class="text-gold">highest-point personnel with zero non-availability</span> for their entire half. Low points = desirable reward.</p></div>
+     <div class="card mb-3" style="padding:1rem"><strong>📅 Phase 1: Daily Duties (in order)</strong>
+       <p class="text-sm text-muted mt-1"><strong>1.</strong> Holidays & weekends → <span class="text-green">lowest-point</span> eligible Marine per day. <strong>2.</strong> Friday, then Mon–Thu → lowest-point Marines still free. Non-availability and cooldown respected.</p></div>
+     <div class="card mb-3" style="padding:1rem"><strong class="text-gold">★ Phase 2: Supernumeraries (last)</strong>
+       <p class="text-sm text-muted mt-1">After all daily slots are filled, two backup positions (1st/2nd half) go to the <span class="text-gold">highest-point Marine</span> fully available for that half who is <em>not</em> already on daily duty.</p></div>
      <div class="card mb-3" style="padding:1rem"><strong>📊 Points & Fairness</strong>
        <p class="text-sm text-muted mt-1">Points accumulate over months. Finalizing updates balances permanently. High-point people get easier assignments and supernumerary roles over time.</p></div>
      <div class="card" style="padding:1rem"><strong>✏ Calendar Editor</strong>

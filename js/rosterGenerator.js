@@ -1,7 +1,13 @@
 /**
  * YouGotFireWatch — Two-Phase Roster Generator
- * Phase 1: Daily duties → lowest-point eligible person (hardest days first)
- * Phase 2: Supernumeraries → highest-point fully-available person per half
+ *
+ * Phase 1 (daily duty, in order):
+ *   1. Holidays & weekends — lowest-point eligible Marine each
+ *   2. Friday, then Mon–Thu — lowest-point eligible among those still free
+ *
+ * Phase 2 (last):
+ *   Supernumeraries — highest-point Marine fully available for the half,
+ *   excluding anyone already assigned daily duty that month.
  */
 
 import {
@@ -54,6 +60,32 @@ function findEligibleForSlot(tempState, slotDate, assignedThisMonth, cooldownDay
   );
 }
 
+/** Lower number = harder day = assigned earlier in Phase 1. */
+function getDayAssignmentOrder(date, year) {
+  const holidays = getUSFederalHolidays(year);
+  const dayType = getDayType(date, isHoliday(date, holidays));
+  const order = { holiday: 0, sunday: 1, saturday: 2, friday: 3, weekday: 4 };
+  return order[dayType] ?? 4;
+}
+
+function sortSlotsForAssignment(slots, year) {
+  return [...slots].sort((a, b) => {
+    const orderDiff = getDayAssignmentOrder(a.date, year) - getDayAssignmentOrder(b.date, year);
+    if (orderDiff !== 0) return orderDiff;
+    const ptsDiff = (b.points ?? 0) - (a.points ?? 0);
+    if (ptsDiff !== 0) return ptsDiff;
+    return a.date.localeCompare(b.date);
+  });
+}
+
+function compareSupernumeraryCandidates(a, b) {
+  if (a.points !== b.points) return b.points - a.points;
+  const aLast = a.lastDutyDate || '';
+  const bLast = b.lastDutyDate || '';
+  if (aLast !== bLast) return aLast.localeCompare(bLast);
+  return a.id.localeCompare(b.id);
+}
+
 export function createMonthSlots(year, month, settings, existingSlots) {
   const days = getMonthDays(year, month);
   const holidays = getUSFederalHolidays(year);
@@ -76,9 +108,9 @@ export function createEmptySupernumeraries(settings) {
   ];
 }
 
-function assignDailyDuties(slots, tempState, cooldownDays) {
+function assignDailyDuties(slots, tempState, cooldownDays, year) {
   const warnings = [], unassigned = [];
-  const sorted = [...slots].sort((a, b) => (b.points ?? 0) - (a.points ?? 0) || a.date.localeCompare(b.date));
+  const sorted = sortSlotsForAssignment(slots, year);
   const assigned = slots.map((s) => ({ ...s, personId: s.personId ?? null }));
 
   // Each person stands daily duty at most once per month (requires enough personnel).
@@ -125,23 +157,26 @@ function assignDailyDuties(slots, tempState, cooldownDays) {
       tempState[pIdx].lastDutyDate = slot.date;
     }
   }
-  return { slots: assigned, unassigned, warnings };
+  return { slots: assigned, unassigned, warnings, assignedPersonIds: assignedThisMonth };
 }
 
-function assignSupernumeraries(supers, tempState, year, month, splitDay) {
+function assignSupernumeraries(supers, tempState, year, month, splitDay, assignedDailyIds) {
   const warnings = [];
   const result = supers.map((s) => ({ ...s }));
 
   for (const sup of result) {
     if (sup.personId) continue;
     const range = getHalfDateRange(year, month, sup.half, splitDay);
-    const available = tempState.filter((p) => isFullyAvailableInRange(p, range.start, range.end));
+    const available = tempState.filter((p) =>
+      isFullyAvailableInRange(p, range.start, range.end) &&
+      !assignedDailyIds.has(p.id)
+    );
     if (!available.length) {
       sup.unfilled = true;
-      warnings.push(`No fully available person for ${sup.half}-half supernumerary (${range.start} to ${range.end}).`);
+      warnings.push(`No fully available person for ${sup.half}-half supernumerary (${range.start} to ${range.end}) who is not already on daily duty.`);
       continue;
     }
-    available.sort((a, b) => b.points - a.points);
+    available.sort(compareSupernumeraryCandidates);
     sup.personId = available[0].id;
     sup.unfilled = false;
     const pIdx = tempState.findIndex((p) => p.id === sup.personId);
@@ -207,8 +242,10 @@ export function generateRoster(year, month, personnel, settings, existingRoster,
     }
   }
 
-  const daily = assignDailyDuties(slots, tempState, settings.cooldownDays);
-  const superResult = assignSupernumeraries(supernumeraries, tempState, year, month, settings.halfSplitDay);
+  const daily = assignDailyDuties(slots, tempState, settings.cooldownDays, year);
+  const superResult = assignSupernumeraries(
+    supernumeraries, tempState, year, month, settings.halfSplitDay, daily.assignedPersonIds
+  );
 
   if (daily.unassigned.length) {
     const unassignedWeekdays = daily.unassigned.filter((date) => getDayType(date, isHoliday(date, getUSFederalHolidays(year))) === 'weekday');
@@ -253,9 +290,12 @@ export function validateDailyAssignment(personId, date, slots, personnel) {
   return { valid: true, message: '' };
 }
 
-export function validateSupernumeraryAssignment(personId, half, personnel, year, month, splitDay) {
+export function validateSupernumeraryAssignment(personId, half, personnel, year, month, splitDay, slots) {
   const person = personnel.find((p) => p.id === personId);
   if (!person) return { valid: false, message: 'Person not found.' };
+  if (slots?.some((s) => s.personId === personId)) {
+    return { valid: false, message: `${person.rank} ${person.name} is already assigned daily duty this month. Supernumeraries go to Marines not on the daily roster.` };
+  }
   const range = getHalfDateRange(year, month, half, splitDay);
   const conflict = person.nonAvailability.some((na) => na.start <= range.end && range.start <= na.end);
   if (conflict) {
