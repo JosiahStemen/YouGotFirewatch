@@ -9,6 +9,7 @@ import {
   getHalfDateRange, generateId, getDayType,
 } from './dateUtils.js';
 import { getUSFederalHolidays, isHoliday } from './holidays.js';
+import { resolvePersonnelForMonth } from './nonAvailability.js';
 
 function clonePersonState(personnel) {
   return personnel.map((p) => ({
@@ -121,6 +122,8 @@ export function generateRoster(year, month, personnel, settings, existingRoster,
     };
   }
 
+  personnel = resolvePersonnelForMonth(personnel, year, month);
+
   const monthDayCount = getMonthDays(year, month).length;
   const rosterWarnings = [];
   if (personnel.length < monthDayCount) {
@@ -180,7 +183,7 @@ export function generateRoster(year, month, personnel, settings, existingRoster,
   };
 }
 
-export function validateDailyAssignment(personId, date, slots) {
+export function validateDailyAssignment(personId, date, slots, personnel) {
   if (!personId) return { valid: true, message: '' };
   const conflict = slots.find((s) => s.personId === personId && s.date !== date);
   if (conflict) {
@@ -188,6 +191,12 @@ export function validateDailyAssignment(personId, date, slots) {
       valid: false,
       message: `This person is already assigned on ${conflict.date}. Each member may only stand daily duty once per month.`,
     };
+  }
+  if (personnel) {
+    const person = personnel.find((p) => p.id === personId);
+    if (person?.nonAvailability?.some((na) => isDateInRange(date, na.start, na.end))) {
+      return { valid: false, message: `${person.rank} ${person.name} is not available on ${date}.` };
+    }
   }
   return { valid: true, message: '' };
 }

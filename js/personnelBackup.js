@@ -1,14 +1,15 @@
 /**
  * YouGotFireWatch Personnel Backup CSV
  *
- * Single-file backup for names, points, last duty date, and non-availability.
- * Import before generating; export after finalizing to hand off duties.
- *
- * non_availability format: periods separated by ";", each "start|end" or "start|end|reason"
- * Example: 2026-06-01|2026-06-05|96-hour liberty;2026-06-10|2026-06-14|Leave
+ * non_availability column (month-relative when you generate):
+ *   (blank) — available whole month
+ *   all     — no duty assigned that month
+ *   1-7     — unavailable the 1st through the 7th
+ *   1-7;20-25 — multiple ranges
  */
 
 import { generateId } from './dateUtils.js';
+import { parseNonAvailabilityColumn, formatNonAvailabilityForExport } from './nonAvailability.js';
 
 function csvField(val) {
   if (val == null || val === '') return '';
@@ -37,20 +38,6 @@ function parseCSVLine(line) {
   return result;
 }
 
-function encodeNonAvailability(na) {
-  if (!na?.length) return '';
-  return na.map((p) => `${p.start}|${p.end}${p.reason ? `|${p.reason}` : ''}`).join(';');
-}
-
-function decodeNonAvailability(str) {
-  if (!str?.trim()) return [];
-  return str.split(';').map((period) => {
-    const parts = period.split('|').map((s) => s.trim());
-    if (parts.length < 2 || !parts[0] || !parts[1]) return null;
-    return { start: parts[0], end: parts[1], reason: parts[2] || undefined };
-  }).filter(Boolean);
-}
-
 export function exportPersonnelBackup(personnel, settings) {
   const today = new Date().toISOString().split('T')[0];
   const lines = [
@@ -59,8 +46,8 @@ export function exportPersonnelBackup(personnel, settings) {
     `# exported,${new Date().toISOString()}`,
     `# unit,${settings?.unitName || ''}`,
     '#',
-    '# Import this file to restore all personnel with points and non-availability.',
-    '# non_availability: start|end|reason periods separated by semicolons',
+    '# Import before generating next month. non_availability uses day-of-month:',
+    '# blank = available all month | all = no duty | 1-7 = unavailable days 1-7 | 1-7;20-25 = multiple',
     '#',
     'rank,name,points,last_duty_date,section,notes,non_availability',
   ];
@@ -73,7 +60,7 @@ export function exportPersonnelBackup(personnel, settings) {
       csvField(p.lastDutyDate || ''),
       csvField(p.section || ''),
       csvField(p.notes || ''),
-      csvField(encodeNonAvailability(p.nonAvailability)),
+      csvField(formatNonAvailabilityForExport(p)),
     ].join(','));
   }
 
@@ -113,6 +100,7 @@ export function parsePersonnelBackupCSV(text) {
       continue;
     }
 
+    const na = parseNonAvailabilityColumn(row.non_availability);
     personnel.push({
       id: generateId(),
       rank: row.rank.trim(),
@@ -121,7 +109,8 @@ export function parsePersonnelBackupCSV(text) {
       lastDutyDate: row.last_duty_date?.trim() || null,
       section: row.section?.trim() || undefined,
       notes: row.notes?.trim() || undefined,
-      nonAvailability: decodeNonAvailability(row.non_availability),
+      nonAvailabilityInput: na.nonAvailabilityInput,
+      nonAvailability: na.nonAvailability,
     });
   }
 
@@ -139,7 +128,10 @@ export function getPersonnelBackupTemplate() {
     '#',
     'rank,name,points,last_duty_date,section,notes,non_availability',
     'SSgt,"Martinez, J.",12,2026-05-28,Admin,,',
-    'Sgt,"Thompson, R.",18,2026-05-25,Operations,,"2026-06-01|2026-06-05|96-hour liberty"',
+    'Sgt,"Thompson, R.",18,2026-05-25,Operations,,1-5',
+    'Cpl,"Davis, M.",15,2026-05-22,Communications,TDY,20-25',
+    'PFC,"Anderson, S.",9,2026-05-29,Supply,,10-14',
+    'LCpl,"Johnson, A.",6,2026-05-31,Motor T,Leave,all',
     'Cpl,"Williams, K.",8,2026-05-30,Supply,,',
     'PFC,"Lee, D.",22,2026-05-20,Communications,Prime super candidate,',
   ].join('\n');

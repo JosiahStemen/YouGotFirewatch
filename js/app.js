@@ -16,6 +16,9 @@ import {
 import {
   exportPersonnelBackup, parsePersonnelBackupCSV, getPersonnelBackupTemplate,
 } from './personnelBackup.js';
+import {
+  resolvePersonnelForMonth, parseNonAvailabilityColumn,
+} from './nonAvailability.js';
 
 // ─── State ───────────────────────────────────────────────────────────────────
 let state = {
@@ -68,6 +71,19 @@ function ptsBadge(pts, max = 10) {
 
 function personMap() { return new Map(state.personnel.map((p) => [p.id, p])); }
 
+function personnelForRosterMonth() {
+  return resolvePersonnelForMonth(state.personnel, ui.genYear, ui.genMonth);
+}
+
+function personNALabel(p) {
+  const input = (p.nonAvailabilityInput ?? '').trim();
+  if (input === 'all') return 'Unavailable all month (no duty assigned)';
+  if (input) return `Unavailable days: ${input}`;
+  const nas = p.nonAvailability ?? [];
+  if (!nas.length) return '';
+  return nas.map((na) => `${formatShortDate(na.start)}–${formatShortDate(na.end)}${na.reason ? ` (${na.reason})` : ''}`).join('; ');
+}
+
 function renderBackupCard(context = 'generate') {
   const count = state.personnel.length;
   return `<div class="card" style="border-color:rgba(107,124,62,0.4);background:rgba(107,124,62,0.05)">
@@ -78,7 +94,8 @@ function renderBackupCard(context = 'generate') {
       <button class="btn btn-secondary btn-sm" data-action="export-personnel-backup">⬇ Export Personnel Backup</button>
       <button class="btn btn-secondary btn-sm" data-action="backup-template">Download Template</button>
     </div>
-    <p class="text-xs text-dim">${count} personnel loaded. Backup includes names, points, last duty date, and non-availability.</p>
+    <p class="text-xs text-dim mb-2">${count} personnel loaded. Edit the backup CSV between months, then import before generating.</p>
+    <p class="text-xs text-dim"><strong>non_availability column:</strong> blank = available all month · <strong>all</strong> = no duty that month · <strong>1-7</strong> = unavailable the 1st–7th · <strong>1-7;20-25</strong> = multiple ranges. Values apply to whichever month you generate.</p>
     ${context === 'generate' ? '<p class="text-xs text-gold mt-2">After finalize, a printable roster opens in a new tab (print dialog + personnel CSV).</p>' : ''}
   </div>`;
 }
@@ -211,14 +228,14 @@ function renderPersonCard(p) {
       <div><span class="text-dim">Points</span><div class="person-points">${p.points}</div></div>
       <div><span class="text-dim">Last Duty</span><div>${p.lastDutyDate ? formatShortDate(p.lastDutyDate) : 'Never'}</div></div>
     </div>
-    ${p.nonAvailability.length ? `<div class="na-badge">⚠ Non-Available: ${p.nonAvailability.map((na) => `${formatShortDate(na.start)}–${formatShortDate(na.end)}${na.reason ? ' ('+esc(na.reason)+')' : ''}`).join('; ')}</div>` : ''}
+    ${(() => { const na = personNALabel(p); return na ? `<div class="na-badge">⚠ ${esc(na)}${(p.nonAvailabilityInput ?? '').trim() ? ` <span class="text-dim">(applies when generating ${formatMonthYear(ui.genMonth, ui.genYear)})</span>` : ''}</div>` : ''; })()}
     ${p.notes ? `<p class="text-xs text-dim mt-2" style="font-style:italic">${esc(p.notes)}</p>` : ''}
   </div>`;
 }
 
 function renderPersonForm() {
   const p = ui.editingPerson;
-  const nas = p?.nonAvailability || [];
+  const naVal = p?.nonAvailabilityInput ?? '';
   return `<form class="card mb-4" data-action="save-person">
     <h3 class="mb-4 font-semibold">${p ? 'Edit' : 'Add'} Person</h3>
     <div class="grid-4 gap-3 mb-3">
@@ -228,25 +245,16 @@ function renderPersonForm() {
       <div><label class="label">Section</label><input class="input" name="section" value="${esc(p?.section)}"></div>
       <div style="grid-column:span 3"><label class="label">Notes</label><input class="input" name="notes" value="${esc(p?.notes)}"></div>
     </div>
-    <div class="mb-3"><div class="flex justify-between mb-2"><label class="label" style="margin:0">Non-Availability</label>
-      <button type="button" class="text-sm text-gold" data-action="add-na">+ Add Period</button></div>
-      <div id="na-fields">${nas.map((na, i) => renderNAFields(na, i)).join('')}</div>
-      ${!nas.length ? '<p class="text-sm text-dim">None set.</p>' : ''}
+    <div class="mb-3">
+      <label class="label">Non-Availability (for roster month)</label>
+      <input class="input" name="non_availability" value="${esc(naVal)}" placeholder="blank = available · all = no duty · 1-7 · 1-7;20-25">
+      <p class="hint">Day-of-month ranges resolved when you generate. Blank = available all month. <strong>all</strong> = skip duty entirely that month.</p>
     </div>
     <div class="flex gap-3 justify-end">
       <button type="button" class="btn btn-secondary" data-action="cancel-person-form">Cancel</button>
       <button type="submit" class="btn btn-primary">${p ? 'Update' : 'Add'} Person</button>
     </div>
   </form>`;
-}
-
-function renderNAFields(na, i) {
-  return `<div class="flex gap-2 mb-2 items-end" data-na-idx="${i}">
-    <div style="flex:1"><label class="label">Start</label><input class="input" name="na_start_${i}" type="date" value="${na.start}"></div>
-    <div style="flex:1"><label class="label">End</label><input class="input" name="na_end_${i}" type="date" value="${na.end}"></div>
-    <div style="flex:1"><label class="label">Reason</label><input class="input" name="na_reason_${i}" value="${esc(na.reason)}" placeholder="96 liberty, TDY..."></div>
-    <button type="button" class="btn btn-danger btn-sm" data-action="remove-na" data-idx="${i}">✕</button>
-  </div>`;
 }
 
 // ─── Generate Tab ────────────────────────────────────────────────────────────
@@ -500,15 +508,7 @@ function handleClick(e) {
     case 'import-personnel-backup': triggerFileImport('.csv', (text) => importPersonnelBackup(text)); break;
     case 'export-personnel-backup': { const f = openPersonnelBackupTab(); toast(`Opened ${f} in new tab`); break; }
     case 'backup-template': openCSVInNewTab(getPersonnelBackupTemplate(), 'YouGotFireWatch-Personnel-Backup-Template.csv'); break;
-    case 'add-na':
-      if (!ui.editingPerson) ui.editingPerson = { nonAvailability: [] };
-      ui.editingPerson.nonAvailability = [...(ui.editingPerson.nonAvailability || []), { start: '', end: '', reason: '' }];
-      render(); break;
-    case 'remove-na': {
-      const idx = parseInt(el.dataset.idx, 10);
-      ui.editingPerson.nonAvailability.splice(idx, 1);
-      render(); break;
-    }
+
     case 'generate': doGenerate(); break;
     case 'toggle-baselines': document.getElementById('baselines-panel')?.classList.toggle('hidden'); break;
     case 'weekend-defaults': ui.slots = applyWeekendHolidayDefaults(ui.slots, state.settings, ui.genYear); syncSlots(); render(); break;
@@ -563,14 +563,7 @@ function handleSubmit(e) {
 
 function savePerson(form) {
   const fd = new FormData(form);
-  const nas = [];
-  let i = 0;
-  while (fd.has(`na_start_${i}`)) {
-    const start = fd.get(`na_start_${i}`);
-    const end = fd.get(`na_end_${i}`);
-    if (start && end) nas.push({ start, end, reason: fd.get(`na_reason_${i}`) || undefined });
-    i++;
-  }
+  const na = parseNonAvailabilityColumn(fd.get('non_availability') || '');
   const person = {
     id: ui.editingPerson?.id || generateId(),
     rank: fd.get('rank').trim(),
@@ -579,7 +572,8 @@ function savePerson(form) {
     lastDutyDate: ui.editingPerson?.lastDutyDate || null,
     section: fd.get('section')?.trim() || undefined,
     notes: fd.get('notes')?.trim() || undefined,
-    nonAvailability: nas,
+    nonAvailabilityInput: na.nonAvailabilityInput,
+    nonAvailability: na.nonAvailability,
   };
   if (ui.editingPerson) {
     const idx = state.personnel.findIndex((p) => p.id === person.id);
@@ -616,7 +610,7 @@ function doGenerate() {
 function reassignSlot(date, personId) {
   if (!state.currentRoster) return;
   if (personId) {
-    const v = validateDailyAssignment(personId, date, state.currentRoster.slots);
+    const v = validateDailyAssignment(personId, date, state.currentRoster.slots, personnelForRosterMonth());
     if (!v.valid) { alert(v.message); render(); return; }
   }
   state.currentRoster.slots = state.currentRoster.slots.map((s) => s.date === date ? { ...s, personId } : s);
@@ -627,7 +621,7 @@ function reassignSlot(date, personId) {
 function assignSuper(half, personId) {
   if (!state.currentRoster) return;
   if (personId) {
-    const v = validateSupernumeraryAssignment(personId, half, state.personnel, ui.genYear, ui.genMonth, state.settings.halfSplitDay);
+    const v = validateSupernumeraryAssignment(personId, half, personnelForRosterMonth(), ui.genYear, ui.genMonth, state.settings.halfSplitDay);
     if (!v.valid) { alert(v.message); render(); return; }
   }
   state.currentRoster.supernumeraries = state.currentRoster.supernumeraries.map((s) =>
@@ -740,7 +734,9 @@ function showHelpModal() {
      <div class="card mb-3" style="padding:1rem"><strong>📊 Points & Fairness</strong>
        <p class="text-sm text-muted mt-1">Points accumulate over months. Finalizing updates balances permanently. High-point people get easier assignments and supernumerary roles over time.</p></div>
      <div class="card" style="padding:1rem"><strong>✏ Calendar Editor</strong>
-       <p class="text-sm text-muted mt-1">Adjust points per day for 96s, holidays, and unit events. Bulk tools apply changes across date ranges.</p></div>`,
+       <p class="text-sm text-muted mt-1">Adjust points per day for 96s, holidays, and unit events. Bulk tools apply changes across date ranges.</p></div>
+     <div class="card mt-3" style="padding:1rem"><strong>📁 Monthly Backup Workflow</strong>
+       <p class="text-sm text-muted mt-1">After finalizing, export the personnel CSV. Before generating the next month, edit <strong>non_availability</strong> in that file: blank = available all month, <strong>all</strong> = no duty, <strong>1-7</strong> = unavailable the 1st–7th. Import the backup, then generate.</p></div>`,
     `<button class="btn btn-primary" data-action="close-modal" style="width:100%">Got It</button>`, 'lg');
 }
 
