@@ -24,7 +24,7 @@ import {
   renderAdncoTab, handleAdncoClick, handleAdncoChange, createAdncoUiDefaults, initAdncoSlots,
 } from './adncoTab.js';
 
-export const APP_VERSION = '2026.06.22';
+export const APP_VERSION = '2026.06.22b';
 
 // ─── State ───────────────────────────────────────────────────────────────────
 let state = {
@@ -35,7 +35,7 @@ let state = {
   currentAdncoRoster: null,
   adncoHistory: [],
   adncoStudents: [],
-  activeTab: 'personnel',
+  activeTab: 'generate',
 };
 
 let ui = {
@@ -65,6 +65,7 @@ function init() {
   }
   if (!state.adncoHistory) state.adncoHistory = [];
   if (!state.adncoStudents) state.adncoStudents = [];
+  if (state.activeTab === 'personnel') state.activeTab = 'generate';
   ui.settingsDraft = { ...state.settings, baselines: { ...state.settings.baselines } };
   ui.slots = createMonthSlots(ui.genYear, ui.genMonth, state.settings);
   initAdncoSlots({ state, ui });
@@ -165,9 +166,9 @@ function render() {
       <button class="btn btn-secondary btn-sm" data-action="show-help">❓ How It Works</button>
     </header>
     <nav class="tabs">
-      ${['personnel','generate','adnco','history','settings'].map((t) =>
+      ${['generate','adnco','history','settings'].map((t) =>
         `<button class="tab-btn ${state.activeTab === t ? 'active' : ''}" data-action="tab" data-tab="${t}">${
-          {personnel:'👥 Personnel',generate:'📅 Generate OOD List',adnco:'🎓 Generate ADNCOs',history:'📋 History',settings:'⚙️ Settings'}[t]
+          {generate:'📅 Generate OOD List',adnco:'🎓 Generate ADNCOs',history:'📋 History',settings:'⚙️ Settings'}[t]
         }</button>`
       ).join('')}
     </nav>
@@ -189,7 +190,7 @@ function renderModal() {
 
 function renderTab() {
   switch (state.activeTab) {
-    case 'personnel': return renderPersonnel();
+    case 'personnel':
     case 'generate': return renderGenerate();
     case 'adnco': return renderAdncoTab(adncoCtx());
     case 'history': return renderHistory();
@@ -198,13 +199,16 @@ function renderTab() {
   }
 }
 
-// ─── Personnel Tab ───────────────────────────────────────────────────────────
-function renderPersonnel() {
+// ─── Personnel (inside Generate OOD tab) ─────────────────────────────────────
+function renderPersonnelPanel() {
   if (!state.personnel.length && !ui.showPersonForm) {
-    return `<div class="empty-state"><div class="empty-icon">👥</div><h3>No Personnel Yet</h3>
-      <p>Add unit members manually, import CSV, or load sample data.</p>
-      <div class="flex gap-3 justify-center"><button class="btn btn-primary" data-action="show-person-form">Add Person</button>
-      <button class="btn btn-secondary" data-action="load-sample">Load Sample Data</button></div></div>`;
+    return `<div class="empty-state" style="padding:1.5rem"><div class="empty-icon">👥</div><h3>No Personnel Yet</h3>
+      <p>Add unit members manually, import a backup CSV, or load sample data before generating.</p>
+      <div class="flex gap-3 justify-center flex-wrap">
+        <button class="btn btn-primary" data-action="show-person-form">Add Person</button>
+        <button class="btn btn-secondary" data-action="import-personnel-backup">Import Backup</button>
+        <button class="btn btn-secondary" data-action="load-sample">Load Sample Data</button>
+      </div></div>`;
   }
 
   const filtered = state.personnel.filter((p) =>
@@ -214,19 +218,14 @@ function renderPersonnel() {
   );
 
   return `
-    <div class="flex flex-wrap justify-between items-center gap-4 mb-4">
-      <div><h2 style="font-size:1.25rem;font-weight:600">Personnel</h2>
-        <p class="text-sm text-muted">${state.personnel.length} member${state.personnel.length !== 1 ? 's' : ''}</p></div>
+    <div class="flex flex-wrap justify-between items-center gap-3 mb-3">
+      <p class="text-sm text-muted">${state.personnel.length} member${state.personnel.length !== 1 ? 's' : ''} — manage OOD duty roster here</p>
       <div class="flex flex-wrap gap-2">
         <button class="btn btn-primary btn-sm" data-action="show-person-form">+ Add Person</button>
-        <button class="btn btn-secondary btn-sm" data-action="import-personnel-backup">Import Backup</button>
-        <button class="btn btn-secondary btn-sm" data-action="export-personnel-backup">Export Backup</button>
-        <button class="btn btn-secondary btn-sm" data-action="backup-template">Template</button>
         <button class="btn btn-secondary btn-sm" data-action="load-sample">Load Sample</button>
       </div>
     </div>
-    ${renderBackupCard('personnel')}
-    <input class="input mb-4" style="max-width:20rem" placeholder="Search..." value="${esc(ui.search)}" data-action="search-personnel">
+    <input class="input mb-3" style="max-width:20rem" placeholder="Search personnel..." value="${esc(ui.search)}" data-action="search-personnel">
     ${ui.showPersonForm ? renderPersonForm() : ''}
     <div class="grid-3">${filtered.map((p) => renderPersonCard(p)).join('')}</div>
     ${!filtered.length && ui.search ? '<p class="text-center text-dim">No matches.</p>' : ''}
@@ -277,12 +276,6 @@ function renderPersonForm() {
 
 // ─── Generate Tab ────────────────────────────────────────────────────────────
 function renderGenerate() {
-  if (!state.personnel.length) {
-    return `<div class="empty-state"><div class="empty-icon">👥</div><h3>Add Personnel First</h3>
-      <p>At least one person is needed before generating a roster.</p>
-      <button class="btn btn-primary" data-action="tab" data-tab="personnel">Go to Personnel</button></div>`;
-  }
-
   const roster = state.currentRoster;
   const isFinalized = roster?.finalized;
   const years = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 1 + i);
@@ -295,19 +288,30 @@ function renderGenerate() {
   let html = `
     <div class="flex flex-wrap justify-between items-center gap-4 mb-4">
       <div><h2 style="font-size:1.25rem;font-weight:600">Generate OOD List</h2>
-        <p class="text-sm text-muted">Configure hardship points, then generate a fair two-phase assignment</p>
-        <p class="text-sm ${staffingOk ? 'text-olive' : 'text-amber'} mt-1">${dutyEligible} duty-eligible / ${monthDays} days this month${staffingOk ? ' — staffing OK' : ' — short-staffed; weekdays may not fill'}</p></div>
+        <p class="text-sm text-muted">Manage personnel, configure hardship points, then generate a fair two-phase assignment</p>
+        ${state.personnel.length ? `<p class="text-sm ${staffingOk ? 'text-olive' : 'text-amber'} mt-1">${dutyEligible} duty-eligible / ${monthDays} days this month${staffingOk ? ' — staffing OK' : ' — short-staffed; weekdays may not fill'}</p>` : ''}</div>
       <div class="flex gap-2">
         <select class="input w-auto" data-action="set-month">${Array.from({length:12},(_,i)=>`<option value="${i+1}" ${ui.genMonth===i+1?'selected':''}>${new Date(2000,i).toLocaleString('en',{month:'long'})}</option>`).join('')}</select>
         <select class="input w-auto" data-action="set-year">${years.map((y)=>`<option value="${y}" ${ui.genYear===y?'selected':''}>${y}</option>`).join('')}</select>
       </div>
     </div>
+
+    <details class="card mb-4 personnel-panel" ${!state.personnel.length || ui.showPersonForm ? 'open' : ''}>
+      <summary class="font-semibold" style="cursor:pointer;list-style:none;display:flex;align-items:center;gap:0.5rem">
+        <span>👥 Personnel</span>
+        <span class="text-sm text-muted font-normal">${state.personnel.length ? `(${state.personnel.length})` : '— add before generating'}</span>
+      </summary>
+      <div class="mt-3">${renderPersonnelPanel()}</div>
+    </details>
+
     ${renderBackupCard('generate')}
     <div class="info-box mb-4">👥 <strong>One duty per person per month</strong> — you need at least as many duty-eligible Marines as days in the month (e.g. 31 for July). Harder days fill first; if short-staffed, Mon–Thu may show unassigned. Equal points is fine — ties pick fairly.</div>
     <div class="info-box mb-4">📅 <strong>Assignment order:</strong> (1) Holidays & weekends → <span class="text-green">lowest-point</span> eligible Marines, (2) Fri then Mon–Thu → lowest-point still available, (3) <span class="text-gold">Supernumeraries last</span> → next-highest balances among Marines not on daily duty (different person per half).</div>
   `;
 
-  if (!ui.generated) {
+  if (!state.personnel.length) {
+    html += `<div class="info-box">Add at least one person above before generating a roster.</div>`;
+  } else if (!ui.generated) {
     html += `<div class="card"><h3 class="mb-4 font-semibold">Calendar Editor — ${formatMonthYear(ui.genMonth, ui.genYear)}</h3>
       ${renderCalendar(ui.slots, false)}</div>
       <div class="text-center mt-4"><button class="btn btn-primary btn-lg" data-action="generate">⚡ Generate OOD List</button></div>`;
@@ -518,7 +522,7 @@ function handleClick(e) {
   if (handleAdncoClick(action, el, adncoCtx())) return;
 
   switch (action) {
-    case 'tab': state.activeTab = el.dataset.tab; render(); break;
+    case 'tab': state.activeTab = el.dataset.tab === 'personnel' ? 'generate' : el.dataset.tab; render(); break;
     case 'show-help': showHelpModal(); break;
     case 'close-modal': closeModal(); break;
     case 'close-modal-overlay':
@@ -757,17 +761,25 @@ function showResetModal() {
 
 function showHelpModal() {
   openModal('How YouGotFireWatch Works',
-    `<p class="text-sm text-muted mb-4">YouGotFireWatch generates fair monthly fire watch rosters using a two-phase algorithm. Every day gets one person; two supernumerary positions reward those who've carried the most duty.</p>
-     <div class="card mb-3" style="padding:1rem"><strong>📅 Phase 1: Daily Duties (in order)</strong>
-       <p class="text-sm text-muted mt-1"><strong>1.</strong> Holidays & weekends → <span class="text-green">lowest-point</span> eligible Marine per day. <strong>2.</strong> Friday, then Mon–Thu → lowest-point Marines still free. Non-availability and cooldown respected.</p></div>
-     <div class="card mb-3" style="padding:1rem"><strong class="text-gold">★ Phase 2: Supernumeraries (last)</strong>
-       <p class="text-sm text-muted mt-1">After daily duty, each half goes to a <em>different</em> Marine — the <span class="text-gold">next-highest point balance</span> among those fully available for that half and <em>not</em> already on the daily roster (uses pre-month points, not same-day duty bumps).</p></div>
-     <div class="card mb-3" style="padding:1rem"><strong>📊 Points & Fairness</strong>
-       <p class="text-sm text-muted mt-1">Points accumulate over months. Finalizing updates balances permanently. High-point people get easier assignments and supernumerary roles over time.</p></div>
-     <div class="card" style="padding:1rem"><strong>✏ Calendar Editor</strong>
-       <p class="text-sm text-muted mt-1">Adjust points per day for 96s, holidays, and unit events. Bulk tools apply changes across date ranges.</p></div>
-     <div class="card mt-3" style="padding:1rem"><strong>📁 Monthly Backup Workflow</strong>
-       <p class="text-sm text-muted mt-1">After finalizing, export the personnel CSV. Before generating the next month, edit <strong>non_availability</strong> in that file: blank = available all month, <strong>all</strong> = no duty, <strong>1-7</strong> = unavailable the 1st–7th. Import the backup, then generate.</p></div>`,
+    `<p class="text-sm text-muted mb-4">YouGotFireWatch runs <strong>two separate roster systems</strong> — main OOD fire watch (points-based) and ADNCO student duty (random fair rotation). They do not share personnel lists.</p>
+
+     <h3 class="text-gold font-semibold mb-2">📅 OOD Fire Watch (Generate OOD List)</h3>
+     <p class="text-sm text-muted mb-3">Personnel live in the Generate OOD List tab. A two-phase algorithm assigns one Marine per day plus two supernumerary half-month positions.</p>
+     <div class="card mb-3" style="padding:1rem"><strong>Phase 1: Daily Duties</strong>
+       <p class="text-sm text-muted mt-1"><strong>1.</strong> Holidays & weekends → <span class="text-green">lowest-point</span> eligible Marine. <strong>2.</strong> Friday, then Mon–Thu → lowest-point Marines still free. Non-availability and cooldown respected.</p></div>
+     <div class="card mb-3" style="padding:1rem"><strong class="text-gold">★ Phase 2: Supernumeraries</strong>
+       <p class="text-sm text-muted mt-1">Each half-month goes to a <em>different</em> Marine — the <span class="text-gold">next-highest point balance</span> among those fully available and <em>not</em> on daily duty that half.</p></div>
+     <div class="card mb-3" style="padding:1rem"><strong>📊 Points & Calendar</strong>
+       <p class="text-sm text-muted mt-1">Click calendar days to set hardship points and notes (96s, holidays). Finalizing permanently updates points and last duty dates. Use the personnel CSV backup workflow each month.</p></div>
+
+     <h3 class="text-gold font-semibold mb-2 mt-4">🎓 ADNCO Student Duty (Generate ADNCOs)</h3>
+     <p class="text-sm text-muted mb-3">Completely separate student list. Each duty night (1630 start) needs <strong>5 positions</strong>: 2× Bldg 829, 2× Bldg 827, 1× Duty Driver. No points — randomized fair rotation.</p>
+     <div class="card mb-3" style="padding:1rem"><strong>Duty Windows</strong>
+       <p class="text-sm text-muted mt-1"><span class="badge-mat">MAT</span> Sun 1630 → Fri 1630 (starts Sun–Thu) · <span class="badge-academic">Academic</span> Fri 1630 → Sun 1630 (starts Fri–Sat). One student cannot fill two positions the same night.</p></div>
+     <div class="card mb-3" style="padding:1rem"><strong>✏ ADNCO Calendar</strong>
+       <p class="text-sm text-muted mt-1">Click any day before or after generating to review positions, add night notes, or manually pre-assign. Re-generate reshuffles open slots (check <em>Keep manual assignments</em> to lock edits).</p></div>
+     <div class="card" style="padding:1rem"><strong>📁 ADNCO Availability (admin)</strong>
+       <p class="text-sm text-muted mt-1">Non-availability is edited in the student CSV <strong>nonAvailability</strong> column only — export, edit day numbers (e.g. <code>5, 12-14</code>), re-import, then generate.</p></div>`,
     `<button class="btn btn-primary" data-action="close-modal" style="width:100%">Got It</button>`, 'lg');
 }
 

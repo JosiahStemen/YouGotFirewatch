@@ -226,6 +226,10 @@ table.data tr:hover { background: rgba(26,35,50,0.3); }
 
 .hidden { display: none !important; }
 
+.personnel-panel summary::-webkit-details-marker { display: none; }
+.personnel-panel summary::before { content: '▸ '; color: var(--gold-400); }
+.personnel-panel[open] summary::before { content: '▾ '; }
+
 /* ADNCO Student Rosters */
 .adnco-header { border-left: 3px solid var(--gold-400); padding-left: 1rem; }
 .adnco-rules { border-color: rgba(201,162,39,0.25); background: rgba(201,162,39,0.04); }
