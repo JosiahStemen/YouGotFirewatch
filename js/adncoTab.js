@@ -2,12 +2,12 @@
  * ADNCO Student Rosters tab — fully separate from main duty roster
  */
 
-import { formatMonthYear, getCalendarGridOffset } from './dateUtils.js';
+import { formatMonthYear, getCalendarGridOffset, parseDate } from './dateUtils.js';
 import { getHolidayName } from './holidays.js';
 import {
   generateAdncoRoster, validateAdncoAssignment, finalizeAdncoRoster,
-  createAdncoSlots, countAdncoStaffing, groupAdncoSlotsByDay, ADNCO_POSITIONS,
-  getEligibleStudentsForSlot,
+  createAdncoSlots, countAdncoStaffing, groupAdncoSlotsByDay, groupAdncoCalendarDays,
+  ADNCO_POSITIONS, getEligibleStudentsForSlot, inferLegacyPeriodId,
 } from './adncoRoster.js';
 import { exportAdncoCSV, openAdncoPrintout } from './adncoExport.js';
 import {
@@ -45,9 +45,37 @@ function adncoSlotsRef(ctx) {
   return state.currentAdncoRoster?.slots ?? ui.adncoSlots;
 }
 
-function getAdncoDayNote(day) {
-  const slot = day.positions['827-1'] ?? Object.values(day.positions)[0];
+function getAdncoPeriodNote(period) {
+  const slot = period.positions['827-1'] ?? Object.values(period.positions)[0];
   return slot?.note;
+}
+
+function renderPeriodSection(period, students, map, readOnly, esc) {
+  const typeClass = period.eligibleType === 'MAT' ? 'badge-mat' : 'badge-academic';
+  const dayNote = getAdncoPeriodNote(period) ?? '';
+  const rows = ADNCO_POSITIONS.map((pos) => {
+    const slot = period.positions[pos.position];
+    const p = slot?.personId ? map.get(slot.personId) : null;
+    const eligible = slot ? getEligibleStudentsForSlot(slot, students) : [];
+    return `<tr>
+      <td><strong>${pos.label}</strong></td>
+      <td>${p ? `${esc(p.rank)} ${esc(p.lastName)}, ${esc(p.firstName)}` : '<span class="text-amber">Unassigned</span>'}</td>
+      <td>${p?.phoneNumber ? esc(p.phoneNumber) : '—'}</td>
+      ${!readOnly && slot ? `<td><select class="input" style="font-size:0.75rem" data-action="adnco-reassign" data-slot-id="${slot.id}">
+        <option value="">Unassigned</option>
+        ${eligible.map((s) => `<option value="${s.id}" ${slot.personId === s.id ? 'selected' : ''}>${esc(adncoDisplayName(s))}</option>`).join('')}
+      </select></td>` : ''}
+    </tr>`;
+  }).join('');
+
+  return `<div class="adnco-period-block mb-4">
+    <p class="text-sm font-semibold mb-1">${esc(period.timeLabel)}</p>
+    <p class="text-sm text-muted mb-2"><span class="${typeClass}">${period.eligibleType}</span> · 5 positions</p>
+    ${!readOnly ? `<div class="mb-2"><label class="label">Period Note</label>
+      <input class="input adnco-period-note" data-period-id="${period.periodId}" value="${esc(dayNote)}" placeholder="e.g., field day"></div>`
+      : (dayNote ? `<p class="text-sm text-dim mb-2">Note: ${esc(dayNote)}</p>` : '')}
+    <div class="table-wrap"><table class="data"><thead><tr><th>Position</th><th>Assigned</th><th>Phone</th>${!readOnly ? '<th>Change</th>' : ''}</tr></thead><tbody>${rows}</tbody></table></div>
+  </div>`;
 }
 
 function renderAdncoBackupCard(ctx) {
@@ -135,12 +163,12 @@ export function renderAdncoTab(ctx) {
         <div>🏢 <strong>2×</strong> Building 829</div>
       </div>
       <div class="text-sm mb-2">🚗 <strong>Duty Driver</strong> — driversLicense <strong>Y</strong> only</div>
-      <div class="grid-2 gap-3 text-sm">
-        <div><span class="badge-mat">MAT</span> Sun <strong>1630</strong> → Fri <strong>1630</strong></div>
-        <div><span class="badge-academic">Academic</span> Fri <strong>1630</strong> → Sun <strong>1630</strong></div>
+      <div class="text-sm mb-2">
+        <div class="mb-1"><span class="badge-mat">MAT</span> Sun <strong>1630</strong>→Mon <strong>0630</strong>, Mon–Thu <strong>0630</strong>→next <strong>0630</strong>, Fri <strong>0630</strong>→<strong>1630</strong></div>
+        <div><span class="badge-academic">Academic</span> Fri <strong>1630</strong>→Sat <strong>0630</strong>, Sat <strong>0630</strong>→Sun <strong>0630</strong>, Sun <strong>0630</strong>→<strong>1630</strong></div>
       </div>
-      <p class="text-xs text-dim mt-2">Assignments are <strong>randomized</strong> with fair rotation — everyone gets a turn before anyone is assigned again. No points. One student cannot fill two positions the same night.</p>
-      <p class="text-xs text-muted mt-1">Staffing: ${staffing.matStudents} MAT students / ${staffing.matPositions} MAT positions (${staffing.matNights} nights × ${staffing.positionsPerNight}) · ${staffing.acStudents} Academic / ${staffing.acPositions} Academic positions (${staffing.acNights} nights)</p>
+      <p class="text-xs text-dim mt-2">Duty changes at <strong>0630</strong> (Fri &amp; Sun end at <strong>1630</strong>). Fri &amp; Sun each have <strong>two duty periods</strong>. Fair random rotation — one student cannot fill two positions in the same period.</p>
+      <p class="text-xs text-muted mt-1">Staffing: ${staffing.matStudents} MAT students / ${staffing.matPositions} MAT positions (${staffing.matNights} periods × ${staffing.positionsPerPeriod}) · ${staffing.acStudents} Academic / ${staffing.acPositions} Academic positions (${staffing.acNights} periods)</p>
     </div>
 
     ${renderAdminWorkflow(ctx)}
@@ -179,39 +207,51 @@ export function renderAdncoTab(ctx) {
 
 function renderAdncoMonthCalendar(ctx, slots, interactive) {
   const { ui, esc } = ctx;
-  const days = groupAdncoSlotsByDay(slots);
+  const calDays = groupAdncoCalendarDays(slots, ui.adncoYear, ui.adncoMonth);
   const offset = getCalendarGridOffset(ui.adncoYear, ui.adncoMonth);
-  const cells = [...Array(offset).fill(null), ...days];
+  const cells = [...Array(offset).fill(null), ...calDays];
   while (cells.length % 7) cells.push(null);
 
   return `
     <div class="cal-grid">
       ${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => `<div class="cal-dow">${d}</div>`).join('')}
-      ${cells.map((day) => {
-        if (!day) return '<div class="cal-day empty"></div>';
-        const dayNum = parseInt(day.startDate.split('-')[2], 10);
-        const holiday = getHolidayName(day.startDate);
-        const typeClass = day.eligibleType === 'MAT' ? 'badge-mat' : 'badge-academic';
-        const filled = ADNCO_POSITIONS.filter((p) => day.positions[p.position]?.personId).length;
-        const total = ADNCO_POSITIONS.length;
-        const full = filled === total;
+      ${cells.map((cell) => {
+        if (!cell) return '<div class="cal-day empty"></div>';
+        const dayNum = parseInt(cell.startDate.split('-')[2], 10);
+        const holiday = getHolidayName(cell.startDate);
+        const periods = cell.periods;
+        let filled = 0;
+        let total = 0;
+        let hasNote = false;
+        const types = new Set();
+        for (const p of periods) {
+          types.add(p.eligibleType);
+          if (getAdncoPeriodNote(p)) hasNote = true;
+          for (const pos of ADNCO_POSITIONS) {
+            total += 1;
+            if (p.positions[pos.position]?.personId) filled += 1;
+          }
+        }
+        const full = total > 0 && filled === total;
         const partial = filled > 0 && filled < total;
-        const dayNote = getAdncoDayNote(day);
-        return `<button type="button" class="cal-day adnco-cal-day ${full ? 'assigned' : partial ? 'has-note' : ''} ${dayNote ? 'has-note' : ''}" ${interactive ? `data-action="adnco-view-day" data-date="${day.startDate}"` : 'disabled style="cursor:default"'}>
+        const typeBadges = [...types].map((t) =>
+          `<span class="${t === 'MAT' ? 'badge-mat' : 'badge-academic'}" style="font-size:0.5rem;padding:0.05rem 0.2rem;margin-right:0.1rem;display:inline-block">${t === 'MAT' ? 'M' : 'A'}</span>`
+        ).join('');
+        const multi = periods.length > 1 ? `<span class="text-xs text-dim" style="font-size:0.5rem">${periods.length}×</span>` : '';
+        return `<button type="button" class="cal-day adnco-cal-day ${full ? 'assigned' : partial ? 'has-note' : ''} ${hasNote ? 'has-note' : ''}" ${interactive ? `data-action="adnco-view-day" data-date="${cell.startDate}"` : 'disabled style="cursor:default"'}>
           <div class="flex justify-between items-start gap-1">
             <span class="cal-day-num">${dayNum}</span>
-            ${filled > 0 ? `<span class="text-xs ${full ? 'text-olive' : 'text-amber'}" style="font-size:0.6rem">${filled}/${total}</span>` : ''}
+            ${total > 0 ? `<span class="text-xs ${full ? 'text-olive' : 'text-amber'}" style="font-size:0.6rem">${filled}/${total}</span>` : ''}
           </div>
-          <span class="${typeClass}" style="font-size:0.55rem;padding:0.05rem 0.25rem;margin-top:0.1rem;display:inline-block">${day.eligibleType === 'MAT' ? 'MAT' : 'AC'}</span>
+          <div style="margin-top:0.1rem">${typeBadges}${multi}</div>
           ${holiday ? `<span class="text-xs text-gold" style="font-size:0.55rem">${holiday}</span>` : ''}
-          ${dayNote && !holiday ? `<span class="cal-day-note" style="font-size:0.55rem">${esc(dayNote)}</span>` : ''}
         </button>`;
       }).join('')}
     </div>
     <div class="cal-legend">
-      <span><span class="badge-mat" style="font-size:0.65rem">MAT</span> Sun–Thu nights</span>
-      <span><span class="badge-academic" style="font-size:0.65rem">AC</span> Fri–Sat nights</span>
-      <span>Click a day to edit · 5 positions per night</span>
+      <span>Changeover <strong>0630</strong> (Fri/Sun end <strong>1630</strong>)</span>
+      <span><span class="badge-mat" style="font-size:0.65rem">M</span> MAT · <span class="badge-academic" style="font-size:0.65rem">A</span> Academic</span>
+      <span>Fri &amp; Sun = 2 periods · click to edit</span>
     </div>`;
 }
 
@@ -343,31 +383,14 @@ export function handleAdncoClick(action, el, ctx) {
       const { esc } = ctx;
       const startDate = el.dataset.date;
       const slots = adncoSlotsRef(ctx);
-      const day = groupAdncoSlotsByDay(slots).find((d) => d.startDate === startDate);
-      if (!day) return true;
+      const periods = groupAdncoSlotsByDay(slots).filter((d) => d.startDate === startDate);
+      if (!periods.length) return true;
       const students = state.adncoStudents ?? [];
       const map = new Map(students.map((p) => [p.id, p]));
       const readOnly = state.currentAdncoRoster?.finalized;
-      const dayNote = getAdncoDayNote(day) ?? '';
-      const rows = ADNCO_POSITIONS.map((pos) => {
-        const slot = day.positions[pos.position];
-        const p = slot?.personId ? map.get(slot.personId) : null;
-        const eligible = slot ? getEligibleStudentsForSlot(slot, students) : [];
-        return `<tr>
-          <td><strong>${pos.label}</strong></td>
-          <td>${p ? `${esc(p.rank)} ${esc(p.lastName)}, ${esc(p.firstName)}` : '<span class="text-amber">Unassigned</span>'}</td>
-          <td>${p?.phoneNumber ? esc(p.phoneNumber) : '—'}</td>
-          ${!readOnly && slot ? `<td><select class="input" style="font-size:0.75rem" data-action="adnco-reassign" data-slot-id="${slot.id}">
-            <option value="">Unassigned</option>
-            ${eligible.map((s) => `<option value="${s.id}" ${slot.personId === s.id ? 'selected' : ''}>${esc(adncoDisplayName(s))}</option>`).join('')}
-          </select></td>` : ''}
-        </tr>`;
-      }).join('');
-      ctx.openModal(`${day.timeLabel}`,
-        `<p class="text-sm text-muted mb-3"><span class="${day.eligibleType === 'MAT' ? 'badge-mat' : 'badge-academic'}">${day.eligibleType}</span> · 5 positions this night</p>
-         ${!readOnly ? `<div class="mb-3"><label class="label">Night Note</label>
-           <input class="input" id="adnco-day-note" value="${esc(dayNote)}" placeholder="e.g., field day, holiday surge"></div>` : (dayNote ? `<p class="text-sm text-dim mb-3">Note: ${esc(dayNote)}</p>` : '')}
-         <div class="table-wrap"><table class="data"><thead><tr><th>Position</th><th>Assigned</th><th>Phone</th>${!readOnly ? '<th>Change</th>' : ''}</tr></thead><tbody>${rows}</tbody></table></div>`,
+      const title = parseDate(startDate).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+      const body = periods.map((p) => renderPeriodSection(p, students, map, readOnly, esc)).join('');
+      ctx.openModal(title, body,
         readOnly
           ? `<button class="btn btn-primary" data-action="close-modal" style="width:100%">Done</button>`
           : `<button class="btn btn-secondary" data-action="close-modal">Cancel</button>
@@ -376,10 +399,17 @@ export function handleAdncoClick(action, el, ctx) {
     }
     case 'adnco-save-day': {
       const startDate = el.dataset.date;
-      const note = document.getElementById('adnco-day-note')?.value?.trim() || undefined;
-      ui.adncoSlots = ui.adncoSlots.map((s) =>
-        s.startDate === startDate ? { ...s, note } : s
-      );
+      const noteInputs = document.querySelectorAll('.adnco-period-note');
+      const notesByPeriod = new Map();
+      noteInputs.forEach((input) => {
+        notesByPeriod.set(input.dataset.periodId, input.value?.trim() || undefined);
+      });
+      ui.adncoSlots = ui.adncoSlots.map((s) => {
+        if (s.startDate !== startDate) return s;
+        const periodId = s.periodId ?? inferLegacyPeriodId(s.startDate);
+        if (!notesByPeriod.has(periodId)) return s;
+        return { ...s, note: notesByPeriod.get(periodId) };
+      });
       syncAdncoSlots(ctx);
       closeModal();
       render();

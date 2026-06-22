@@ -25,7 +25,7 @@ import {
 } from './adncoTab.js';
 import { normalizeStudentList } from './personnelUtils.js';
 
-export const APP_VERSION = '2026.06.23';
+export const APP_VERSION = '2026.06.24';
 
 // ─── State ───────────────────────────────────────────────────────────────────
 let state = {
@@ -775,11 +775,11 @@ function showHelpModal() {
        <p class="text-sm text-muted mt-1">Click calendar days to set hardship points and notes (96s, holidays). Finalizing permanently updates points and last duty dates. Use the personnel CSV backup workflow each month.</p></div>
 
      <h3 class="text-gold font-semibold mb-2 mt-4">🎓 ADNCO Student Duty (Generate ADNCOs)</h3>
-     <p class="text-sm text-muted mb-3">Separate student CSV backup — same monthly workflow as OOD. Each night (1630 start): <strong>Bldg 827 (DNCO)</strong> (LCpl only), Bldg 827 #2, 2× Bldg 829, Duty Driver (<strong>driversLicense Y</strong> only).</p>
+     <p class="text-sm text-muted mb-3">Separate student CSV backup — same monthly workflow as OOD. Duty changes at <strong>0630</strong> (Fri/Sun end at <strong>1630</strong>). Each period needs 5 positions: <strong>Bldg 827 (DNCO)</strong> (LCpl), Bldg 827 #2, 2× Bldg 829, Duty Driver (<strong>driversLicense Y</strong>).</p>
      <div class="card mb-3" style="padding:1rem"><strong>Monthly Workflow</strong>
        <p class="text-sm text-muted mt-1">Export student CSV → edit <strong>nonAvailability</strong>, add/remove students, set <strong>driversLicense</strong> → import → calendar → generate → finalize (printout + new CSV open automatically).</p></div>
      <div class="card mb-3" style="padding:1rem"><strong>Duty Windows</strong>
-       <p class="text-sm text-muted mt-1"><span class="badge-mat">MAT</span> Sun 1630 → Fri 1630 · <span class="badge-academic">Academic</span> Fri 1630 → Sun 1630. Fair random rotation — no points.</p></div>
+       <p class="text-sm text-muted mt-1"><span class="badge-mat">MAT</span> Sun 1630→Mon 0630 through Fri 0630→1630 · <span class="badge-academic">Academic</span> Fri 1630→Sat 0630 through Sun 0630→1630. Fri &amp; Sun each have two duty periods.</p></div>
      <div class="card" style="padding:1rem"><strong>✏ ADNCO Calendar</strong>
        <p class="text-sm text-muted mt-1">Click days to pre-assign or add notes. DNCO slot always requires an LCpl; driver slot requires license Y in the CSV.</p></div>`,
     `<button class="btn btn-primary" data-action="close-modal" style="width:100%">Got It</button>`, 'lg');

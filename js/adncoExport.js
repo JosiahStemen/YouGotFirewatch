@@ -74,7 +74,9 @@ export function openAdncoPrintout(roster, students, settings) {
 <p class="sub">${settings?.unitName || 'YouGotFireWatch'} · Generated ${new Date().toLocaleString()}</p>
 <div class="rules">
   <strong>Each night (in order):</strong> Bldg 827 (DNCO, LCpl) · Bldg 827 #2 · 2× Bldg 829 · Duty Driver (licensed)<br>
-  <strong>Duty windows:</strong> MAT = Sun 1630 – Fri 1630 · Academic = Fri 1630 – Sun 1630
+  <strong>Duty changeover 0630</strong> (Fri &amp; Sun end 1630)<br>
+  <strong>MAT:</strong> Sun 1630→Mon 0630, Mon–Thu 0630→0630, Fri 0630→1630<br>
+  <strong>Academic:</strong> Fri 1630→Sat 0630, Sat 0630→Sun 0630, Sun 0630→1630
 </div>
 <table>
   <thead><tr><th>Date &amp; Time</th><th>Type</th>${posHeaders}</tr></thead>
