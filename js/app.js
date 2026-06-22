@@ -27,7 +27,7 @@ import {
 import { groupAdncoSlotsByDay } from './adncoRoster.js';
 import { normalizeStudentList } from './personnelUtils.js';
 
-export const APP_VERSION = '2026.06.29';
+export const APP_VERSION = '2026.06.30';
 
 // ─── State ───────────────────────────────────────────────────────────────────
 let state = {
@@ -832,7 +832,7 @@ function showHelpModal() {
        <p class="text-sm text-muted mt-1">Click calendar days to set hardship points and notes (96s, holidays). Finalizing permanently updates points and last duty dates. Use the personnel CSV backup workflow each month.</p></div>
 
      <h3 class="text-gold font-semibold mb-2 mt-4">🎓 ADNCO Student Duty (Generate ADNCOs)</h3>
-     <p class="text-sm text-muted mb-3">Separate student CSV backup. <strong>Generate auto-fills Academic periods only</strong> — MAT platoon completes MAT rows in the Excel file after finalize. Each period needs 5 positions: Bldg 827 (DNCO, LCpl), Bldg 827 #2, 2× Bldg 829, Duty Driver (<strong>driversLicense Y</strong>).</p>
+     <p class="text-sm text-muted mb-3">Student CSV uses <strong>section</strong> (1, 2, 3 = Academic platoons; MAT = MAT platoon). <strong>Generate auto-fills Academic periods only</strong> — MAT platoon completes MAT rows in Excel after finalize.</p>
      <div class="card mb-3" style="padding:1rem"><strong>Monthly Workflow</strong>
        <p class="text-sm text-muted mt-1">Import student CSV → generate (Academic only) → finalize → <strong>Excel roster downloads</strong> (MAT rows blank) + student CSV. Send Excel to MAT platoon; save CSV for next month.</p></div>
      <div class="card mb-3" style="padding:1rem"><strong>Duty Windows</strong>

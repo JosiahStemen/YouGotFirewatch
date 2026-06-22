@@ -4,7 +4,9 @@
 
 import { generateId } from './dateUtils.js';
 import { parseDayNumberInput, formatDayNumberForDisplay } from './dayNumberAvailability.js';
-import { normalizeStudent, parseDriversLicense, studentMatchKey } from './personnelUtils.js';
+import {
+  normalizeStudent, parseDriversLicense, studentMatchKey, parseAdncoSection,
+} from './personnelUtils.js';
 
 function csvField(val) {
   if (val == null || val === '') return '';
@@ -37,13 +39,13 @@ export function getStudentImportTemplate() {
   return [
     '# YouGotFireWatch ADNCO Student Roster',
     '# Completely separate from main duty personnel backup',
-    '# studentType must be Academic or MAT',
+    '# section: 1, 2, 3 (Academic platoons) or MAT',
     '# nonAvailability: day numbers for the roster month, e.g. 5, 12-14, 20 — or all for entire month',
     '# driversLicense: Y or N — only Y can be assigned Duty Driver',
-    'rank,lastName,firstName,phoneNumber,studentType,driversLicense,lastDutyDate,nonAvailability',
+    'rank,lastName,firstName,phoneNumber,section,driversLicense,lastDutyDate,nonAvailability',
     'LCpl,Garcia,Luis,831-555-0101,MAT,Y,,',
-    'Cpl,Anderson,Sarah,831-555-0102,Academic,N,,"10-12, 18"',
-    'PFC,Miller,James,831-555-0103,MAT,Y,,5,20-22',
+    'Cpl,Anderson,Sarah,831-555-0102,2,N,,"10-12, 18"',
+    'PFC,Miller,James,831-555-0103,1,Y,,5,20-22',
   ].join('\n');
 }
 
@@ -51,7 +53,7 @@ export function exportAdncoStudentsCSV(students) {
   const today = new Date().toISOString().split('T')[0];
   const lines = [
     '# YouGotFireWatch ADNCO Students',
-    'rank,lastName,firstName,phoneNumber,studentType,driversLicense,lastDutyDate,nonAvailability',
+    'rank,lastName,firstName,phoneNumber,section,driversLicense,lastDutyDate,nonAvailability',
   ];
   for (const s of students) {
     lines.push([
@@ -59,7 +61,7 @@ export function exportAdncoStudentsCSV(students) {
       csvField(s.lastName),
       csvField(s.firstName),
       csvField(s.phoneNumber || ''),
-      csvField(s.studentType),
+      csvField(s.section || (s.studentType === 'MAT' ? 'MAT' : '1')),
       csvField(s.driversLicense ? 'Y' : 'N'),
       csvField(s.lastAdncoDutyDate || ''),
       csvField(formatDayNumberForDisplay(s.adncoNonAvailabilityInput || '')),
@@ -79,11 +81,14 @@ export function parseStudentImportCSV(text) {
   }
 
   const headers = parseCSVLine(dataLines[0]).map((h) => h.toLowerCase().replace(/\s+/g, '_'));
-  const required = ['rank', 'lastname', 'firstname', 'studenttype'];
+  const required = ['rank', 'lastname', 'firstname'];
   for (const r of required) {
     if (!headers.includes(r)) {
       return { students: [], error: `Missing required column: ${r}` };
     }
+  }
+  if (!headers.includes('section') && !headers.includes('studenttype')) {
+    return { students: [], error: 'Missing required column: section (1, 2, 3, or MAT). Legacy studentType column also accepted.' };
   }
 
   const students = [];
@@ -96,13 +101,14 @@ export function parseStudentImportCSV(text) {
     const row = {};
     headers.forEach((h, idx) => { row[h] = vals[idx] ?? ''; });
 
-    const studentType = row.studenttype?.trim();
+    const sectionRaw = row.section?.trim() || row.studenttype?.trim() || '';
     if (!row.rank || !row.lastname || !row.firstname) {
       errors.push(`Row ${i + 1}: missing rank or name — skipped.`);
       continue;
     }
-    if (studentType !== 'Academic' && studentType !== 'MAT') {
-      errors.push(`Row ${i + 1}: studentType must be Academic or MAT — skipped.`);
+    const section = parseAdncoSection(sectionRaw);
+    if (!section) {
+      errors.push(`Row ${i + 1}: section must be 1, 2, 3, or MAT (legacy Academic/MAT also accepted) — skipped.`);
       continue;
     }
 
@@ -116,7 +122,7 @@ export function parseStudentImportCSV(text) {
       lastName: row.lastname.trim(),
       firstName: row.firstname.trim(),
       phoneNumber: row.phonenumber?.trim() || '',
-      studentType,
+      section,
       driversLicense: parseDriversLicense(dlRaw),
       lastAdncoDutyDate: row.lastdutydate?.trim() || null,
       adncoNonAvailabilityInput: na.normalized || '',

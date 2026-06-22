@@ -13,6 +13,7 @@ import {
   getMonthDays, toISODate, parseDate, generateId, formatShortDate,
 } from './dateUtils.js';
 import { parseDayNumberInput, resolveDayNumberRangesForMonth } from './dayNumberAvailability.js';
+import { getStudentDutyType } from './personnelUtils.js';
 
 export const ADNCO_POSITIONS = [
   { position: '827-1', label: 'Bldg 827 (DNCO)', requiresLcpl: true },
@@ -35,7 +36,7 @@ export function hasDriversLicense(person) {
 export function personEligibleForAdncoSlot(person, slot) {
   if (!person || !slot) return false;
   // All positions — including Duty Driver — require matching MAT or Academic for this period
-  if (person.studentType !== slot.eligibleType) return false;
+  if (getStudentDutyType(person) !== slot.eligibleType) return false;
   if (slot.position === '827-1' && !isLcplRank(person.rank)) return false;
   if (slot.position === 'driver' && !hasDriversLicense(person)) return false;
   return true;
@@ -220,7 +221,7 @@ export function applyPeriodEligibleType(slots, startDate, periodId, newType, stu
     let personId = s.personId;
     if (personId) {
       const person = studentMap.get(personId);
-      if (!person || person.studentType !== newType) personId = null;
+      if (!person || getStudentDutyType(person) !== newType) personId = null;
     }
     return {
       ...s,
@@ -441,13 +442,13 @@ function pickFairRandom(resolved, slot, assignedInPeriod, assignmentCount) {
 }
 
 export function generateAdncoRoster(year, month, students, existingRoster, keepManual, editedSlots) {
-  students = (students ?? []).filter((p) => p.studentType === 'Academic' || p.studentType === 'MAT');
+  students = (students ?? []).filter((p) => getStudentDutyType(p));
   const warnings = [];
 
   if (!students.length) {
     return {
       roster: null,
-      warnings: ['No students with studentType Academic or MAT. Import a student CSV or load sample students in the ADNCO tab.'],
+      warnings: ['No students with section 1, 2, 3, or MAT. Import a student CSV or load sample students in the ADNCO tab.'],
     };
   }
 
@@ -485,13 +486,13 @@ export function generateAdncoRoster(year, month, students, existingRoster, keepM
   const matPeriods = periodGroups.filter((p) => p.eligibleType === 'MAT').length;
   const acPeriods = periodGroups.filter((p) => p.eligibleType === 'Academic').length;
 
-  if (acPeriods && !resolved.some((p) => p.studentType === 'Academic')) {
-    warnings.push(`${acPeriods} Academic duty period(s) but no Academic students on roster.`);
+  if (acPeriods && !resolved.some((p) => getStudentDutyType(p) === 'Academic')) {
+    warnings.push(`${acPeriods} Academic duty period(s) but no section 1/2/3 students on roster.`);
   }
-  if (matPeriods && !resolved.some((p) => p.studentType === 'MAT')) {
-    warnings.push(`${matPeriods} MAT period(s) on calendar — no MAT students listed (platoon fills Excel manually).`);
+  if (matPeriods && !resolved.some((p) => getStudentDutyType(p) === 'MAT')) {
+    warnings.push(`${matPeriods} MAT period(s) on calendar — no MAT section students listed (platoon fills Excel manually).`);
   }
-  if (acPeriods && !resolved.some((p) => p.studentType === 'Academic' && isLcplRank(p.rank))) {
+  if (acPeriods && !resolved.some((p) => getStudentDutyType(p) === 'Academic' && isLcplRank(p.rank))) {
     warnings.push('Academic periods require LCpls for Bldg 827 (DNCO) — no Academic LCpls on roster.');
   }
 
@@ -568,10 +569,12 @@ export function validateAdncoAssignment(personId, slotId, roster, students, year
   const person = (students ?? []).find((p) => p.id === personId);
   if (!slot || !person) return { valid: false, message: 'Invalid slot or person.' };
 
-  if (person.studentType !== slot.eligibleType) {
+  const dutyType = getStudentDutyType(person);
+  if (dutyType !== slot.eligibleType) {
+    const sec = person.section ? `section ${person.section}` : dutyType;
     return {
       valid: false,
-      message: `${person.rank} ${person.lastName || person.name} is ${person.studentType}. This period requires ${slot.eligibleType} students.`,
+      message: `${person.rank} ${person.lastName || person.name} is ${sec}. This period requires ${slot.eligibleType} students.`,
     };
   }
 
@@ -589,10 +592,11 @@ export function validateAdncoAssignment(personId, slotId, roster, students, year
         message: `${person.rank} ${person.lastName || person.name} does not have a driver's license (driversLicense must be Y in the student CSV).`,
       };
     }
-    if (person.studentType !== slot.eligibleType) {
+    if (dutyType !== slot.eligibleType) {
+      const sec = person.section ? `section ${person.section}` : dutyType;
       return {
         valid: false,
-        message: `Duty Driver on this period requires a ${slot.eligibleType} student with a license. ${person.rank} ${person.lastName || person.name} is ${person.studentType}.`,
+        message: `Duty Driver on this period requires a ${slot.eligibleType} student with a license. ${person.rank} ${person.lastName || person.name} is ${sec}.`,
       };
     }
   }
@@ -645,8 +649,8 @@ export function countAdncoStaffing(slots, students) {
   const matPeriods = periods.filter((p) => p.eligibleType === 'MAT').length;
   const acPeriods = periods.filter((p) => p.eligibleType === 'Academic').length;
   const positionsPerPeriod = ADNCO_POSITIONS.length;
-  const matStudents = (students ?? []).filter((p) => p.studentType === 'MAT').length;
-  const acStudents = (students ?? []).filter((p) => p.studentType === 'Academic').length;
+  const matStudents = (students ?? []).filter((p) => getStudentDutyType(p) === 'MAT').length;
+  const acStudents = (students ?? []).filter((p) => getStudentDutyType(p) === 'Academic').length;
   return {
     matNights: matPeriods,
     acNights: acPeriods,

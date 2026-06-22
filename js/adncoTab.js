@@ -18,7 +18,9 @@ import {
 } from './studentImport.js';
 import { createSampleAdncoStudents } from './sampleData.js';
 import { DAY_NUMBER_HINT, parseDayNumberInput, formatDayNumberForDisplay } from './dayNumberAvailability.js';
-import { adncoDisplayName, normalizeStudent } from './personnelUtils.js';
+import {
+  adncoDisplayName, normalizeStudent, ADNCO_SECTIONS, parseAdncoSection, formatAdncoSectionLabel,
+} from './personnelUtils.js';
 import { openCSVInNewTab } from './export.js';
 
 export function upsertAdncoHistory(state, roster) {
@@ -143,14 +145,14 @@ function refreshAdncoSlotsAfterStudentChange(ctx) {
 }
 
 function renderAdncoStudentCard(s, esc, year, month) {
-  const typeClass = s.studentType === 'MAT' ? 'badge-mat' : 'badge-academic';
+  const typeClass = s.section === 'MAT' ? 'badge-mat' : 'badge-academic';
   const na = studentNALabel(s);
   return `<div class="card person-card">
     <div class="flex justify-between mb-3">
       <div>
         <span class="person-rank">${esc(s.rank)}</span>
         <h3>${esc(s.lastName)}, ${esc(s.firstName)}</h3>
-        <span class="${typeClass}">${esc(s.studentType)}</span>
+        <span class="${typeClass}">${esc(formatAdncoSectionLabel(s.section))}</span>
       </div>
       <div class="flex gap-2">
         <button class="btn btn-secondary btn-sm" data-action="adnco-edit-student" data-id="${s.id}">Edit</button>
@@ -177,11 +179,13 @@ function renderAdncoStudentForm(ctx) {
       <div><label class="label">Last Name</label><input class="input" name="lastName" value="${esc(s?.lastName)}" required></div>
       <div><label class="label">First Name</label><input class="input" name="firstName" value="${esc(s?.firstName)}" required></div>
       <div><label class="label">Phone</label><input class="input" name="phoneNumber" value="${esc(s?.phoneNumber)}"></div>
-      <div><label class="label">Student Type</label>
-        <select class="input" name="studentType" required>
-          <option value="MAT" ${s?.studentType === 'MAT' ? 'selected' : ''}>MAT</option>
-          <option value="Academic" ${s?.studentType === 'Academic' ? 'selected' : ''}>Academic</option>
-        </select></div>
+      <div><label class="label">Section</label>
+        <select class="input" name="section" required>
+          ${ADNCO_SECTIONS.map((sec) =>
+            `<option value="${sec}" ${s?.section === sec ? 'selected' : ''}>${sec === 'MAT' ? 'MAT' : `Section ${sec} (Academic)`}</option>`
+          ).join('')}
+        </select>
+        <p class="hint mb-0">1–3 = Academic platoons · MAT = MAT platoon</p></div>
       <div><label class="label">Driver&apos;s License</label>
         <select class="input" name="driversLicense">
           <option value="N" ${!s?.driversLicense ? 'selected' : ''}>N</option>
@@ -222,7 +226,8 @@ function renderAdncoStudentsPanel(ctx) {
     || s.rank.toLowerCase().includes(q)
     || s.lastName.toLowerCase().includes(q)
     || s.firstName.toLowerCase().includes(q)
-    || s.studentType.toLowerCase().includes(q)
+    || (s.section || '').toLowerCase().includes(q)
+    || formatAdncoSectionLabel(s.section).toLowerCase().includes(q)
     || (s.phoneNumber || '').toLowerCase().includes(q)
   );
 
@@ -253,7 +258,7 @@ function renderAdncoBackupCard(ctx) {
       <button class="btn btn-secondary btn-sm" data-action="adnco-student-template">Download Template</button>
     </div>
     <p class="text-xs text-dim mb-2">${count} student${count !== 1 ? 's' : ''} loaded. Edit the backup CSV between months, then import before generating.</p>
-    <p class="text-xs text-dim"><strong>nonAvailability:</strong> day numbers for the roster month, or <strong>all</strong> for no duty that month · <strong>driversLicense:</strong> Y = eligible for Duty Driver · Bldg 827 (DNCO) always requires an <strong>LCpl</strong>.</p>
+    <p class="text-xs text-dim"><strong>section:</strong> 1, 2, 3 (Academic), or MAT · <strong>nonAvailability:</strong> day numbers or <strong>all</strong> · <strong>driversLicense:</strong> Y for Duty Driver · DNCO requires <strong>LCpl</strong>.</p>
     <p class="text-xs text-gold mt-2">After finalize, a formatted Excel roster downloads automatically (MAT rows blank for platoon) plus an updated student CSV.</p>
   </div>`;
 }
@@ -426,7 +431,7 @@ function renderAdminWorkflow(ctx) {
     <p class="text-sm text-muted mb-3">All student data lives in the CSV backup — not edited in-app. Each month for ${formatMonthYear(ui.adncoMonth, ui.adncoYear)}:</p>
     <ol class="text-sm text-muted" style="margin:0 0 0.75rem 1.25rem;line-height:1.6">
       <li><strong>Export Student List</strong> (or use last month&apos;s file after finalize)</li>
-      <li>Edit CSV: update <strong>nonAvailability</strong>, add/remove students, set <strong>driversLicense</strong> (Y/N)</li>
+      <li>Edit CSV: update <strong>section</strong> (1, 2, 3, MAT), <strong>nonAvailability</strong>, set <strong>driversLicense</strong> (Y/N)</li>
       <li><strong>Import Backup</strong> to load the updated file into the calendar</li>
       <li>Review calendar — click days to pre-assign or add notes</li>
       <li><strong>Generate ADNCOs</strong> (Academic auto-filled) → verify → <strong>Finalize</strong></li>
@@ -704,9 +709,9 @@ export function handleAdncoSubmit(form, ctx) {
     alert(na.error);
     return true;
   }
-  const studentType = fd.get('studentType')?.trim();
-  if (studentType !== 'MAT' && studentType !== 'Academic') {
-    alert('Student type must be MAT or Academic.');
+  const section = parseAdncoSection(fd.get('section')?.trim());
+  if (!section) {
+    alert('Section must be 1, 2, 3, or MAT.');
     return true;
   }
   const lastDuty = fd.get('lastAdncoDutyDate')?.trim() || null;
@@ -716,7 +721,7 @@ export function handleAdncoSubmit(form, ctx) {
     lastName: fd.get('lastName').trim(),
     firstName: fd.get('firstName').trim(),
     phoneNumber: fd.get('phoneNumber')?.trim() || '',
-    studentType,
+    section,
     driversLicense: fd.get('driversLicense') === 'Y',
     lastAdncoDutyDate: lastDuty,
     adncoDutyCount: ui.adncoEditingStudent?.adncoDutyCount ?? 0,

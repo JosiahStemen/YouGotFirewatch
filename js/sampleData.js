@@ -17,15 +17,15 @@ export function createSamplePersonnel() {
 
 export function createSampleAdncoStudents() {
   return [
-    { id: generateId(), rank: 'LCpl', lastName: 'Garcia', firstName: 'Luis', phoneNumber: '831-555-0101', studentType: 'MAT', driversLicense: true, lastAdncoDutyDate: null, adncoNonAvailabilityInput: '' },
-    { id: generateId(), rank: 'LCpl', lastName: 'Rivera', firstName: 'Marcus', phoneNumber: '831-555-0105', studentType: 'MAT', driversLicense: true, lastAdncoDutyDate: null, adncoNonAvailabilityInput: '' },
-    { id: generateId(), rank: 'LCpl', lastName: 'Brooks', firstName: 'Tyler', phoneNumber: '831-555-0108', studentType: 'Academic', driversLicense: false, lastAdncoDutyDate: null, adncoNonAvailabilityInput: '' },
-    { id: generateId(), rank: 'Cpl', lastName: 'Anderson', firstName: 'Sarah', phoneNumber: '831-555-0102', studentType: 'Academic', driversLicense: false, lastAdncoDutyDate: null, adncoNonAvailabilityInput: '10-12' },
-    { id: generateId(), rank: 'PFC', lastName: 'Miller', firstName: 'James', phoneNumber: '831-555-0103', studentType: 'MAT', driversLicense: true, lastAdncoDutyDate: null, adncoNonAvailabilityInput: '' },
-    { id: generateId(), rank: 'PFC', lastName: 'Chen', firstName: 'Amy', phoneNumber: '831-555-0104', studentType: 'Academic', driversLicense: true, lastAdncoDutyDate: null, adncoNonAvailabilityInput: '5, 15-17' },
-    { id: generateId(), rank: 'Cpl', lastName: 'Thompson', firstName: 'Ryan', phoneNumber: '831-555-0106', studentType: 'MAT', driversLicense: false, lastAdncoDutyDate: null, adncoNonAvailabilityInput: '' },
-    { id: generateId(), rank: 'PFC', lastName: 'Nguyen', firstName: 'Kim', phoneNumber: '831-555-0107', studentType: 'MAT', driversLicense: false, lastAdncoDutyDate: null, adncoNonAvailabilityInput: '' },
-    { id: generateId(), rank: 'PFC', lastName: 'Patel', firstName: 'Dev', phoneNumber: '831-555-0109', studentType: 'Academic', driversLicense: true, lastAdncoDutyDate: null, adncoNonAvailabilityInput: '' },
-    { id: generateId(), rank: 'Cpl', lastName: 'Santos', firstName: 'Maria', phoneNumber: '831-555-0110', studentType: 'MAT', driversLicense: false, lastAdncoDutyDate: null, adncoNonAvailabilityInput: '' },
+    { id: generateId(), rank: 'LCpl', lastName: 'Garcia', firstName: 'Luis', phoneNumber: '831-555-0101', section: 'MAT', driversLicense: true, lastAdncoDutyDate: null, adncoNonAvailabilityInput: '' },
+    { id: generateId(), rank: 'LCpl', lastName: 'Rivera', firstName: 'Marcus', phoneNumber: '831-555-0105', section: 'MAT', driversLicense: true, lastAdncoDutyDate: null, adncoNonAvailabilityInput: '' },
+    { id: generateId(), rank: 'LCpl', lastName: 'Brooks', firstName: 'Tyler', phoneNumber: '831-555-0108', section: '1', driversLicense: false, lastAdncoDutyDate: null, adncoNonAvailabilityInput: '' },
+    { id: generateId(), rank: 'Cpl', lastName: 'Anderson', firstName: 'Sarah', phoneNumber: '831-555-0102', section: '2', driversLicense: false, lastAdncoDutyDate: null, adncoNonAvailabilityInput: '10-12' },
+    { id: generateId(), rank: 'PFC', lastName: 'Miller', firstName: 'James', phoneNumber: '831-555-0103', section: 'MAT', driversLicense: true, lastAdncoDutyDate: null, adncoNonAvailabilityInput: '' },
+    { id: generateId(), rank: 'PFC', lastName: 'Chen', firstName: 'Amy', phoneNumber: '831-555-0104', section: '3', driversLicense: true, lastAdncoDutyDate: null, adncoNonAvailabilityInput: '5, 15-17' },
+    { id: generateId(), rank: 'Cpl', lastName: 'Thompson', firstName: 'Ryan', phoneNumber: '831-555-0106', section: 'MAT', driversLicense: false, lastAdncoDutyDate: null, adncoNonAvailabilityInput: '' },
+    { id: generateId(), rank: 'PFC', lastName: 'Nguyen', firstName: 'Kim', phoneNumber: '831-555-0107', section: 'MAT', driversLicense: false, lastAdncoDutyDate: null, adncoNonAvailabilityInput: '' },
+    { id: generateId(), rank: 'PFC', lastName: 'Patel', firstName: 'Dev', phoneNumber: '831-555-0109', section: '1', driversLicense: true, lastAdncoDutyDate: null, adncoNonAvailabilityInput: '' },
+    { id: generateId(), rank: 'Cpl', lastName: 'Santos', firstName: 'Maria', phoneNumber: '831-555-0110', section: '2', driversLicense: false, lastAdncoDutyDate: null, adncoNonAvailabilityInput: '' },
   ];
 }
