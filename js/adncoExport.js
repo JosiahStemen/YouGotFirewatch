@@ -2,50 +2,110 @@ import { formatMonthYear } from './dateUtils.js';
 import { groupAdncoSlotsByDay, ADNCO_POSITIONS } from './adncoRoster.js';
 
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-const EXPORT_BUILD = '20260707';
+const EXPORT_BUILD = '20260708';
 
-const COLORS = {
-  navy: '1A2332',
-  white: 'FFFFFF',
-  slate: '4B5563',
-  lightGray: 'F4F6F8',
-  border: 'CBD5E1',
+/** Mirrors openAdncoPrintout() CSS — keep in sync when changing print layout. */
+export const ADNCO_PRINT_THEME = {
+  bodyText: '111111',
+  subText: '555555',
+  rulesBg: 'F4F6F8',
+  rulesBorder: 'DDDDDD',
+  tableBorder: 'CCCCCC',
+  headerBg: '1A2332',
   headerText: 'FFFFFF',
-  academicBg: 'FFFBEB',
-  academicAlt: 'FEF9E7',
-  academicType: '92400E',
-  matBg: 'EFF6FF',
-  matAlt: 'DBEAFE',
-  matType: '1E40AF',
-  matHint: '64748B',
-  finalized: '6B7C3E',
-  subtitleBg: 'E8EDF2',
-  unassigned: '9CA3AF',
+  rowStripe: 'F9FAFB',
+  rowWhite: 'FFFFFF',
+  typeMatBg: 'DBEAFE',
+  typeMatText: '1E40AF',
+  typeAcademicBg: 'FEF3C7',
+  typeAcademicText: '92400E',
+  matManualBg: 'FFFBEB',
+  badgeFinalized: '6B7C3E',
+  phoneWeight: true,
 };
 
-function thinBorder(color = COLORS.border) {
+function thinBorder(color = ADNCO_PRINT_THEME.tableBorder) {
   const side = { style: 'thin', color: { rgb: color } };
   return { top: side, bottom: side, left: side, right: side };
 }
 
+function rulesBorder() {
+  const c = { rgb: ADNCO_PRINT_THEME.rulesBorder };
+  return {
+    top: { style: 'thin', color: c },
+    bottom: { style: 'thin', color: c },
+    left: { style: 'thin', color: c },
+    right: { style: 'thin', color: c },
+  };
+}
+
 function makeStyle({ font = {}, fill, alignment = {}, border = thinBorder() } = {}) {
-  const style = { font: { name: 'Calibri', sz: 11, color: { rgb: COLORS.navy }, ...font }, alignment: { vertical: 'center', wrapText: true, ...alignment }, border };
+  const style = {
+    font: { name: 'Calibri', sz: 11, color: { rgb: ADNCO_PRINT_THEME.bodyText }, ...font },
+    alignment: { vertical: 'top', wrapText: true, ...alignment },
+    border,
+  };
   if (fill) style.fill = { patternType: 'solid', fgColor: { rgb: fill } };
   return style;
 }
 
-const STYLES = {
-  title: makeStyle({ font: { bold: true, sz: 18, color: { rgb: COLORS.white } }, fill: COLORS.navy, alignment: { horizontal: 'center' } }),
-  subtitle: makeStyle({ font: { sz: 11, color: { rgb: COLORS.slate } }, fill: COLORS.subtitleBg, alignment: { horizontal: 'center' } }),
-  info: makeStyle({ font: { sz: 10, color: { rgb: COLORS.slate } }, fill: COLORS.lightGray, alignment: { horizontal: 'center', wrapText: true } }),
-  colHeader: makeStyle({ font: { bold: true, sz: 10, color: { rgb: COLORS.white } }, fill: COLORS.navy, alignment: { horizontal: 'center' } }),
-  time: (bg) => makeStyle({ font: { sz: 10 }, fill: bg, alignment: { horizontal: 'left' } }),
-  typeAcademic: (bg) => makeStyle({ font: { bold: true, sz: 10, color: { rgb: COLORS.academicType } }, fill: bg, alignment: { horizontal: 'center' } }),
-  typeMat: (bg) => makeStyle({ font: { bold: true, sz: 10, color: { rgb: COLORS.matType } }, fill: bg, alignment: { horizontal: 'center' } }),
-  assignee: (bg) => makeStyle({ font: { sz: 10 }, fill: bg, alignment: { horizontal: 'left', wrapText: true } }),
-  matBlank: (bg) => makeStyle({ font: { italic: true, sz: 10, color: { rgb: COLORS.matHint } }, fill: bg, alignment: { horizontal: 'center' } }),
-  unassigned: (bg) => makeStyle({ font: { italic: true, sz: 10, color: { rgb: COLORS.unassigned } }, fill: bg, alignment: { horizontal: 'center' } }),
+function rowBg(dataIndex) {
+  return dataIndex % 2 === 1 ? ADNCO_PRINT_THEME.rowStripe : ADNCO_PRINT_THEME.rowWhite;
+}
+
+const PRINT_STYLES = {
+  title: makeStyle({ font: { bold: true, sz: 16 }, alignment: { vertical: 'center' } }),
+  titleFinalized: makeStyle({
+    font: { bold: true, sz: 16, color: { rgb: ADNCO_PRINT_THEME.badgeFinalized } },
+    alignment: { vertical: 'center' },
+  }),
+  subtitle: makeStyle({ font: { sz: 11, color: { rgb: ADNCO_PRINT_THEME.subText } }, alignment: { vertical: 'center' } }),
+  rules: makeStyle({
+    font: { sz: 10, color: { rgb: ADNCO_PRINT_THEME.bodyText } },
+    fill: ADNCO_PRINT_THEME.rulesBg,
+    border: rulesBorder(),
+    alignment: { vertical: 'center', wrapText: true },
+  }),
+  colHeader: makeStyle({
+    font: { bold: true, sz: 10, color: { rgb: ADNCO_PRINT_THEME.headerText } },
+    fill: ADNCO_PRINT_THEME.headerBg,
+    alignment: { horizontal: 'left', vertical: 'center' },
+  }),
+  dataCell: (bg) => makeStyle({ font: { sz: 10 }, fill: bg, alignment: { horizontal: 'left', vertical: 'top' } }),
+  typeAcademic: makeStyle({
+    font: { bold: true, sz: 9, color: { rgb: ADNCO_PRINT_THEME.typeAcademicText } },
+    fill: ADNCO_PRINT_THEME.typeAcademicBg,
+    alignment: { horizontal: 'center', vertical: 'center' },
+  }),
+  typeMat: makeStyle({
+    font: { bold: true, sz: 9, color: { rgb: ADNCO_PRINT_THEME.typeMatText } },
+    fill: ADNCO_PRINT_THEME.typeMatBg,
+    alignment: { horizontal: 'center', vertical: 'center' },
+  }),
+  assignee: (bg) => makeStyle({ font: { sz: 10 }, fill: bg, alignment: { horizontal: 'left', vertical: 'top', wrapText: true } }),
+  matManual: makeStyle({
+    font: { italic: true, sz: 10, color: { rgb: ADNCO_PRINT_THEME.subText } },
+    fill: ADNCO_PRINT_THEME.matManualBg,
+    alignment: { horizontal: 'left', vertical: 'top' },
+  }),
+  unassigned: (bg) => makeStyle({
+    font: { italic: true, sz: 10, color: { rgb: ADNCO_PRINT_THEME.subText } },
+    fill: bg,
+    alignment: { horizontal: 'left', vertical: 'top' },
+  }),
 };
+
+function adncoPrintTitle(roster) {
+  const label = `ADNCO Roster — ${formatMonthYear(roster.month, roster.year)}`;
+  return roster.finalized ? `${label}  FINALIZED` : label;
+}
+
+function adncoPrintRulesLines() {
+  return [
+    'Each night (in order): Bldg 827 (DNCO, LCpl) · Bldg 827 #2 · 2× Bldg 829 · Duty Driver (licensed)',
+    'Academic rows auto-assigned · MAT rows filled manually by MAT platoon in Excel',
+  ];
+}
 
 function getXlsxLibOrNull() {
   const lib = (typeof globalThis !== 'undefined' && globalThis.XLSX)
@@ -165,18 +225,17 @@ function setStyledCell(XLSX, ws, r, c, value, style) {
 function buildAdncoWorkbook(XLSX, roster, students, settings) {
   const map = new Map((students ?? []).map((p) => [p.id, p]));
   const days = groupAdncoSlotsByDay(roster.slots);
-  const monthLabel = formatMonthYear(roster.month, roster.year);
   const unit = settings?.unitName || 'YouGotFireWatch';
   const generated = new Date().toLocaleString();
   const colCount = 2 + ADNCO_POSITIONS.length;
+  const [rulesLine1, rulesLine2] = adncoPrintRulesLines();
   const headerRow = 5;
   const dataStart = headerRow + 1;
 
   const rows = Array.from({ length: dataStart + days.length }, () => Array(colCount).fill(''));
-  rows[0][0] = `${monthLabel} ADNCO Roster`;
-  rows[1][0] = `${unit} · Generated ${generated}${roster.finalized ? ' · FINALIZED' : ''}`;
-  rows[2][0] = 'Positions (in order): Bldg 827 (DNCO, LCpl) · Bldg 827 #2 · Bldg 829 #1 · Bldg 829 #2 · Duty Driver (licensed)';
-  rows[3][0] = 'Academic rows are auto-filled. MAT rows are left blank for MAT platoon to complete.';
+  rows[0][0] = adncoPrintTitle(roster);
+  rows[1][0] = `${unit} · Generated ${generated}`;
+  rows[2][0] = `${rulesLine1}\n${rulesLine2}`;
   rows[headerRow] = ['Date & Time', 'Type', ...ADNCO_POSITIONS.map((p) => p.label)];
 
   days.forEach((day, idx) => {
@@ -187,7 +246,7 @@ function buildAdncoWorkbook(XLSX, roster, students, settings) {
     ADNCO_POSITIONS.forEach((pos, pi) => {
       const slot = day.positions[pos.position];
       const p = slot?.personId ? map.get(slot.personId) : null;
-      if (isMat) rows[r][2 + pi] = '';
+      if (isMat) rows[r][2 + pi] = 'MAT — fill in Excel';
       else if (!p) rows[r][2 + pi] = 'Unassigned';
       else rows[r][2 + pi] = personExcelValue(p) || personCell(p);
     });
@@ -195,48 +254,44 @@ function buildAdncoWorkbook(XLSX, roster, students, settings) {
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
 
-  setStyledCell(XLSX, ws, 0, 0, rows[0][0], STYLES.title);
-  setStyledCell(XLSX, ws, 1, 0, rows[1][0], roster.finalized
-    ? makeStyle({ font: { sz: 11, bold: true, color: { rgb: COLORS.white } }, fill: COLORS.finalized, alignment: { horizontal: 'center' } })
-    : STYLES.subtitle);
-  setStyledCell(XLSX, ws, 2, 0, rows[2][0], STYLES.info);
-  setStyledCell(XLSX, ws, 3, 0, rows[3][0], STYLES.info);
-  rows[headerRow].forEach((label, c) => setStyledCell(XLSX, ws, headerRow, c, label, STYLES.colHeader));
+  setStyledCell(XLSX, ws, 0, 0, rows[0][0], roster.finalized ? PRINT_STYLES.titleFinalized : PRINT_STYLES.title);
+  setStyledCell(XLSX, ws, 1, 0, rows[1][0], PRINT_STYLES.subtitle);
+  setStyledCell(XLSX, ws, 2, 0, rows[2][0], PRINT_STYLES.rules);
+  rows[headerRow].forEach((label, c) => setStyledCell(XLSX, ws, headerRow, c, label, PRINT_STYLES.colHeader));
 
   days.forEach((day, idx) => {
     const r = dataStart + idx;
     const isMat = day.eligibleType === 'MAT';
-    const bg = isMat ? (idx % 2 ? COLORS.matAlt : COLORS.matBg) : (idx % 2 ? COLORS.academicAlt : COLORS.academicBg);
-    setStyledCell(XLSX, ws, r, 0, day.timeLabel, STYLES.time(bg));
-    setStyledCell(XLSX, ws, r, 1, day.eligibleType, isMat ? STYLES.typeMat(bg) : STYLES.typeAcademic(bg));
+    const bg = rowBg(idx);
+    setStyledCell(XLSX, ws, r, 0, day.timeLabel, PRINT_STYLES.dataCell(bg));
+    setStyledCell(XLSX, ws, r, 1, day.eligibleType, isMat ? PRINT_STYLES.typeMat : PRINT_STYLES.typeAcademic);
     ADNCO_POSITIONS.forEach((pos, pi) => {
       const slot = day.positions[pos.position];
       const p = slot?.personId ? map.get(slot.personId) : null;
       const c = 2 + pi;
-      if (isMat) setStyledCell(XLSX, ws, r, c, '', STYLES.matBlank(bg));
-      else if (!p) setStyledCell(XLSX, ws, r, c, 'Unassigned', STYLES.unassigned(bg));
-      else setStyledCell(XLSX, ws, r, c, personExcelValue(p) || personCell(p), STYLES.assignee(bg));
+      if (isMat) setStyledCell(XLSX, ws, r, c, 'MAT — fill in Excel', PRINT_STYLES.matManual);
+      else if (!p) setStyledCell(XLSX, ws, r, c, 'Unassigned', PRINT_STYLES.unassigned(bg));
+      else setStyledCell(XLSX, ws, r, c, personExcelValue(p) || personCell(p), PRINT_STYLES.assignee(bg));
     });
   });
 
   ws['!cols'] = [
-    { wch: 36 },
-    { wch: 12 },
-    ...ADNCO_POSITIONS.map(() => ({ wch: 22 })),
+    { wch: 34 },
+    { wch: 11 },
+    ...ADNCO_POSITIONS.map(() => ({ wch: 20 })),
   ];
   ws['!rows'] = [
-    { hpt: 30 },
-    { hpt: 22 },
     { hpt: 28 },
+    { hpt: 18 },
     { hpt: 22 },
-    { hpt: 8 },
-    { hpt: 24 },
-    ...days.map(() => ({ hpt: 42 })),
+    { hpt: 18 },
+    { hpt: 10 },
+    { hpt: 22 },
+    ...days.map(() => ({ hpt: 38 })),
   ];
-  ws['!merges'] = [0, 1, 2, 3].map((r) => ({
-    s: { r, c: 0 },
-    e: { r, c: colCount - 1 },
-  }));
+  ws['!merges'] = [
+    { s: { r: 2, c: 0 }, e: { r: 3, c: colCount - 1 } },
+  ];
   ws['!freeze'] = { xSplit: 0, ySplit: dataStart, topLeftCell: 'A7', activePane: 'bottomLeft', state: 'frozen' };
   ws['!printHeader'] = [1, dataStart];
   ws['!margins'] = { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.3, footer: 0.3 };
@@ -292,7 +347,7 @@ export async function downloadAdncoExcel(roster, students, settings) {
     console.error('ADNCO Excel export failed:', err);
     alert(
       `Could not create Excel file (export ${EXPORT_BUILD}):\n\n${err.message}\n\n`
-      + 'Try Ctrl+Shift+R to hard refresh. Footer should show v2026.07.07.'
+      + 'Try Ctrl+Shift+R to hard refresh. Footer should show v2026.07.08.'
     );
     return false;
   }
@@ -301,7 +356,9 @@ export async function downloadAdncoExcel(roster, students, settings) {
 export function openAdncoPrintout(roster, students, settings) {
   const map = new Map((students ?? []).map((p) => [p.id, p]));
   const days = groupAdncoSlotsByDay(roster.slots);
+  const t = ADNCO_PRINT_THEME;
   const finalized = roster.finalized ? ' <span class="badge">FINALIZED</span>' : '';
+  const [rulesLine1, rulesLine2] = adncoPrintRulesLines();
 
   const posHeaders = ADNCO_POSITIONS.map((p) => `<th>${p.label}</th>`).join('');
 
@@ -327,30 +384,28 @@ export function openAdncoPrintout(roster, students, settings) {
   }).join('');
 
   const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
-<title>ADNCO Roster — ${formatMonthYear(roster.month, roster.year)}</title>
+<title>${adncoPrintTitle(roster)}</title>
 <style>
-  body { font-family: system-ui, sans-serif; padding: 1rem; color: #111; max-width: 72rem; margin: 0 auto; font-size: 0.8rem; }
+  body { font-family: system-ui, sans-serif; padding: 1rem; color: #${t.bodyText}; max-width: 72rem; margin: 0 auto; font-size: 0.8rem; }
   h1 { font-size: 1.35rem; margin-bottom: 0.25rem; }
-  .sub { color: #555; font-size: 0.9rem; margin-bottom: 1.25rem; }
-  .rules { background: #f4f6f8; border: 1px solid #dde; padding: 0.75rem 1rem; border-radius: 8px; font-size: 0.85rem; margin-bottom: 1.25rem; }
+  h1 .badge { color: #${t.badgeFinalized}; }
+  .sub { color: #${t.subText}; font-size: 0.9rem; margin-bottom: 1.25rem; }
+  .rules { background: #${t.rulesBg}; border: 1px solid #${t.rulesBorder}; padding: 0.75rem 1rem; border-radius: 8px; font-size: 0.85rem; margin-bottom: 1.25rem; }
   table { width: 100%; border-collapse: collapse; }
-  th, td { border: 1px solid #ccc; padding: 0.4rem 0.5rem; text-align: left; vertical-align: top; }
-  th { background: #1a2332; color: #fff; font-size: 0.75rem; }
-  tr:nth-child(even) { background: #f9fafb; }
+  th, td { border: 1px solid #${t.tableBorder}; padding: 0.4rem 0.5rem; text-align: left; vertical-align: top; }
+  th { background: #${t.headerBg}; color: #${t.headerText}; font-size: 0.75rem; }
+  tr:nth-child(even) { background: #${t.rowStripe}; }
   .phone { font-weight: 600; font-size: 0.85rem; margin-top: 0.15rem; }
   .type { font-size: 0.7rem; padding: 0.1rem 0.4rem; border-radius: 4px; font-weight: 600; }
-  .type.mat { background: #dbeafe; color: #1e40af; }
-  .type.academic { background: #fef3c7; color: #92400e; }
-  .mat-manual { background: #fffbeb; }
-  .badge { background: #6b7c3e; color: #fff; padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.75rem; }
+  .type.mat { background: #${t.typeMatBg}; color: #${t.typeMatText}; }
+  .type.academic { background: #${t.typeAcademicBg}; color: #${t.typeAcademicText}; }
+  .mat-manual { background: #${t.matManualBg}; }
+  .badge { background: #${t.badgeFinalized}; color: #fff; padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.75rem; }
   @media print { body { padding: 0.25rem; font-size: 0.7rem; } .no-print { display: none; } }
 </style></head><body>
-<h1>ADNCO Roster — ${formatMonthYear(roster.month, roster.year)}${finalized}</h1>
+<h1>${adncoPrintTitle(roster).replace('  FINALIZED', '')}${finalized}</h1>
 <p class="sub">${settings?.unitName || 'YouGotFireWatch'} · Generated ${new Date().toLocaleString()}</p>
-<div class="rules">
-  <strong>Each night (in order):</strong> Bldg 827 (DNCO, LCpl) · Bldg 827 #2 · 2× Bldg 829 · Duty Driver (licensed)<br>
-  <strong>Academic rows</strong> auto-assigned · <strong>MAT rows</strong> filled manually by MAT platoon in Excel
-</div>
+<div class="rules">${rulesLine1}<br>${rulesLine2}</div>
 <table>
   <thead><tr><th>Date &amp; Time</th><th>Type</th>${posHeaders}</tr></thead>
   <tbody>${rows}</tbody>

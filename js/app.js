@@ -23,11 +23,11 @@ import {
 import {
   renderAdncoTab, renderAdncoResults, handleAdncoClick, handleAdncoChange,
   handleAdncoInput, handleAdncoSubmit, createAdncoUiDefaults, initAdncoSlots,
-} from './adncoTab.js?v=20260707';
+} from './adncoTab.js?v=20260708';
 import { groupAdncoSlotsByDay } from './adncoRoster.js';
 import { normalizeStudentList } from './personnelUtils.js';
 
-export const APP_VERSION = '2026.07.07';
+export const APP_VERSION = '2026.07.08';
 
 // ─── State ───────────────────────────────────────────────────────────────────
 let state = {

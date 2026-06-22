@@ -11,7 +11,7 @@ import {
   applyPeriodEligibleType, getDefaultEligibleType,
   purgeInvalidSlotAssignments, isAdncoUnavailableAllMonth, getAdncoNonAvailabilityInput,
 } from './adncoRoster.js';
-import { exportAdncoCSV, openAdncoPrintout, downloadAdncoExcel } from './adncoExport.js?v=20260707';
+import { exportAdncoCSV, openAdncoPrintout, downloadAdncoExcel } from './adncoExport.js?v=20260708';
 import {
   getStudentImportTemplate, parseStudentImportCSV, mergeStudentsIntoRoster,
   exportAdncoStudentsCSV,
