@@ -69,7 +69,7 @@ function openAdncoDayModal(ctx, startDate) {
   const map = new Map(students.map((p) => [p.id, p]));
   const readOnly = state.currentAdncoRoster?.finalized === true;
   const title = parseDate(startDate).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
-  const body = periods.map((p) => renderPeriodSection(p, students, map, readOnly, esc)).join('');
+  const body = periods.map((p) => renderPeriodSection(p, students, map, readOnly, esc, ui.adncoYear, ui.adncoMonth)).join('');
   ui.adncoModalDate = startDate;
   openModal(title, body,
     readOnly
@@ -78,13 +78,13 @@ function openAdncoDayModal(ctx, startDate) {
          <button class="btn btn-primary" data-action="adnco-save-day" data-date="${startDate}">Save</button>`, 'lg');
 }
 
-function renderPeriodSection(period, students, map, readOnly, esc) {
+function renderPeriodSection(period, students, map, readOnly, esc, year, month) {
   const typeClass = period.eligibleType === 'MAT' ? 'badge-mat' : 'badge-academic';
   const dayNote = getAdncoPeriodNote(period) ?? '';
   const rows = ADNCO_POSITIONS.map((pos) => {
     const slot = period.positions[pos.position];
     const p = slot?.personId ? map.get(slot.personId) : null;
-    const eligible = slot ? getEligibleStudentsForSlot(slot, students) : [];
+    const eligible = slot ? getEligibleStudentsForSlot(slot, students, year, month) : [];
     return `<tr>
       <td><strong>${pos.label}</strong></td>
       <td>${p ? `${esc(p.rank)} ${esc(p.lastName)}, ${esc(p.firstName)}` : '<span class="text-amber">Unassigned</span>'}</td>
@@ -134,19 +134,19 @@ function renderAdncoBackupCard(ctx) {
       <button class="btn btn-secondary btn-sm" data-action="adnco-student-template">Download Template</button>
     </div>
     <p class="text-xs text-dim mb-2">${count} student${count !== 1 ? 's' : ''} loaded. Edit the backup CSV between months, then import before generating.</p>
-    <p class="text-xs text-dim"><strong>nonAvailability:</strong> day numbers for the roster month · <strong>driversLicense:</strong> Y = eligible for Duty Driver · Bldg 827 (DNCO) always requires an <strong>LCpl</strong>.</p>
+    <p class="text-xs text-dim"><strong>nonAvailability:</strong> day numbers for the roster month, or <strong>all</strong> for no duty that month · <strong>driversLicense:</strong> Y = eligible for Duty Driver · Bldg 827 (DNCO) always requires an <strong>LCpl</strong>.</p>
     <p class="text-xs text-gold mt-2">After finalize, a printable ADNCO roster and updated student CSV open in new tabs.</p>
   </div>`;
 }
 
-function renderPositionCell(slot, students, map, readOnly, esc) {
+function renderPositionCell(slot, students, map, readOnly, esc, year, month) {
   const p = slot?.personId ? map.get(slot.personId) : null;
   if (readOnly || !slot) {
     return p
       ? `<div><strong>${esc(p.rank)} ${esc(p.lastName)}, ${esc(p.firstName)}</strong>${p.phoneNumber ? `<div class="adnco-phone text-xs">${esc(p.phoneNumber)}</div>` : ''}</div>`
       : '<span class="text-amber">—</span>';
   }
-  const eligible = getEligibleStudentsForSlot(slot, students);
+  const eligible = getEligibleStudentsForSlot(slot, students, year, month);
   return `<select class="input" style="font-size:0.7rem;width:100%;min-width:7rem" data-action="adnco-reassign" data-slot-id="${slot.id}">
     <option value="">Unassigned</option>
     ${eligible.map((s) => `<option value="${s.id}" ${slot.personId === s.id ? 'selected' : ''}>${esc(adncoDisplayName(s))}</option>`).join('')}
@@ -332,7 +332,7 @@ export function renderAdncoResults(ctx, rosterOverride) {
   const rows = days.map((day) => {
     const typeClass = day.eligibleType === 'MAT' ? 'badge-mat' : 'badge-academic';
     const cells = ADNCO_POSITIONS.map((pos) =>
-      `<td>${renderPositionCell(day.positions[pos.position], students, map, readOnly, esc)}</td>`
+      `<td>${renderPositionCell(day.positions[pos.position], students, map, readOnly, esc, roster.year, roster.month)}</td>`
     ).join('');
     return `<tr>
       <td style="white-space:nowrap">${esc(day.timeLabel)}</td>
@@ -424,7 +424,7 @@ export function handleAdncoClick(action, el, ctx) {
       document.querySelectorAll('.adnco-period-type').forEach((select) => {
         if (select.dataset.date !== startDate) return;
         slots = applyPeriodEligibleType(
-          slots, select.dataset.date, select.dataset.periodId, select.value, students
+          slots, select.dataset.date, select.dataset.periodId, select.value, students, ui.adncoYear, ui.adncoMonth
         );
       });
       const noteInputs = document.querySelectorAll('.adnco-period-note');
@@ -546,7 +546,7 @@ export function handleAdncoChange(action, el, ctx) {
     const periodId = el.dataset.periodId;
     const newType = el.value;
     ui.adncoSlots = applyPeriodEligibleType(
-      ui.adncoSlots, startDate, periodId, newType, state.adncoStudents ?? []
+      ui.adncoSlots, startDate, periodId, newType, state.adncoStudents ?? [], ui.adncoYear, ui.adncoMonth
     );
     syncAdncoSlots(ctx);
     persist();

@@ -10,7 +10,7 @@
  */
 
 import {
-  getMonthDays, toISODate, parseDate, isDateInRange, generateId, formatShortDate,
+  getMonthDays, toISODate, parseDate, generateId, formatShortDate,
 } from './dateUtils.js';
 import { parseDayNumberInput, resolveDayNumberRangesForMonth } from './dayNumberAvailability.js';
 
@@ -41,17 +41,46 @@ export function personEligibleForAdncoSlot(person, slot) {
   return true;
 }
 
-export function purgeInvalidSlotAssignments(slots, students) {
+export function getAdncoNonAvailabilityInput(person) {
+  const raw = person.adncoNonAvailabilityInput ?? person.nonAvailabilityInput ?? person.nonAvailability ?? '';
+  return String(raw).trim();
+}
+
+export function isAdncoUnavailableAllMonth(person) {
+  const parsed = parseDayNumberInput(getAdncoNonAvailabilityInput(person));
+  return parsed.parts.length === 1 && parsed.parts[0].toLowerCase() === 'all';
+}
+
+function isStudentAvailableForSlot(person, slot, year, month) {
+  if (!personEligibleForAdncoSlot(person, slot)) return false;
+  const resolved = person.adncoResolvedNA != null
+    ? person
+    : resolveAdncoPersonnel([person], year, month)[0];
+  return !slotBlockedByNA(resolved, slot);
+}
+
+export function purgeInvalidSlotAssignments(slots, students, year, month) {
+  const resolvedById = year && month
+    ? new Map(resolveAdncoPersonnel(students ?? [], year, month).map((p) => [p.id, p]))
+    : null;
+
   return (slots ?? []).map((s) => {
     if (!s.personId) return s;
-    const person = (students ?? []).find((p) => p.id === s.personId);
-    if (person && personEligibleForAdncoSlot(person, s)) return s;
-    return { ...s, personId: null };
+    const person = resolvedById?.get(s.personId) ?? (students ?? []).find((p) => p.id === s.personId);
+    if (!person) return { ...s, personId: null };
+    if (year && month) {
+      return isStudentAvailableForSlot(person, s, year, month) ? s : { ...s, personId: null };
+    }
+    return personEligibleForAdncoSlot(person, s) ? s : { ...s, personId: null };
   });
 }
 
-export function getEligibleStudentsForSlot(slot, students) {
-  return (students ?? []).filter((s) => personEligibleForAdncoSlot(s, slot));
+export function getEligibleStudentsForSlot(slot, students, year, month) {
+  if (!year || !month) {
+    return (students ?? []).filter((s) => personEligibleForAdncoSlot(s, slot));
+  }
+  return resolveAdncoPersonnel(students ?? [], year, month)
+    .filter((p) => isStudentAvailableForSlot(p, slot, year, month));
 }
 
 function nextDayIso(iso) {
@@ -182,7 +211,7 @@ export function consolidateUniformDaySlots(slots) {
 }
 
 /** Override MAT ↔ Academic for one duty period (e.g. 96 liberty). Clears assignments that no longer match. */
-export function applyPeriodEligibleType(slots, startDate, periodId, newType, students) {
+export function applyPeriodEligibleType(slots, startDate, periodId, newType, students, year, month) {
   const defaultType = getDefaultEligibleType(startDate, periodId);
   const studentMap = new Map((students ?? []).map((p) => [p.id, p]));
   let updated = slots.map((s) => {
@@ -200,7 +229,7 @@ export function applyPeriodEligibleType(slots, startDate, periodId, newType, stu
       personId,
     };
   });
-  updated = purgeInvalidSlotAssignments(updated, students);
+  updated = purgeInvalidSlotAssignments(updated, students, year, month);
   return consolidateUniformDaySlots(updated);
 }
 
@@ -346,8 +375,8 @@ export function groupAdncoCalendarDays(slots, year, month) {
 }
 
 export function resolveAdncoNonAvailability(person, year, month) {
-  const input = person.adncoNonAvailabilityInput ?? '';
-  if (!input.trim()) return [];
+  const input = getAdncoNonAvailabilityInput(person);
+  if (!input) return [];
   const parsed = parseDayNumberInput(input);
   if (parsed.error) return [];
   return resolveDayNumberRangesForMonth(parsed.parts, year, month);
@@ -361,9 +390,12 @@ export function resolveAdncoPersonnel(personnel, year, month) {
 }
 
 function slotBlockedByNA(person, slot) {
-  return person.adncoResolvedNA.some(
-    (na) => isDateInRange(slot.startDate, na.start, na.end) || isDateInRange(slot.endDate, na.start, na.end)
-  );
+  if (isAdncoUnavailableAllMonth(person)) return true;
+  const ranges = person.adncoResolvedNA ?? [];
+  if (!ranges.length) return false;
+  const periodStart = slot.startDate;
+  const periodEnd = slot.endDate ?? periodStart;
+  return ranges.some((na) => na.start <= periodEnd && periodStart <= na.end);
 }
 
 function shuffle(arr) {
@@ -439,7 +471,7 @@ export function generateAdncoRoster(year, month, students, existingRoster, keepM
     slots = slots.map((s) => ({ ...s, personId: null }));
   }
 
-  slots = purgeInvalidSlotAssignments(slots, students);
+  slots = purgeInvalidSlotAssignments(slots, students, year, month);
   slots = consolidateUniformDaySlots(slots);
 
   const assignmentCount = new Map();
@@ -575,10 +607,11 @@ export function validateAdncoAssignment(personId, slotId, roster, students, year
 
   const resolved = resolveAdncoPersonnel([person], year, month)[0];
   if (slotBlockedByNA(resolved, slot)) {
-    return {
-      valid: false,
-      message: `${person.rank} ${person.lastName || person.name} is not available for this shift (check non-availability days).`,
-    };
+    const name = `${person.rank} ${person.lastName || person.name}`;
+    const message = isAdncoUnavailableAllMonth(person)
+      ? `${name} is marked unavailable for the entire month (nonAvailability: all).`
+      : `${name} is not available for this shift (check non-availability days).`;
+    return { valid: false, message };
   }
 
   return { valid: true, message: '' };

@@ -9,6 +9,10 @@ export function parseDriversLicense(val) {
 export function normalizeStudent(student) {
   const s = { ...student };
   s.phoneNumber = s.phoneNumber ?? '';
+  if (!String(s.adncoNonAvailabilityInput ?? '').trim()) {
+    const legacy = s.nonAvailabilityInput ?? s.nonAvailability ?? '';
+    if (String(legacy).trim()) s.adncoNonAvailabilityInput = String(legacy).trim();
+  }
   s.adncoNonAvailabilityInput = s.adncoNonAvailabilityInput ?? '';
   s.driversLicense = s.driversLicense === true || parseDriversLicense(s.driversLicense);
   return s;
