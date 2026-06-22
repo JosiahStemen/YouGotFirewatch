@@ -24,8 +24,8 @@ export function parseNonAvailabilityColumn(str) {
     return { nonAvailabilityInput: 'all', nonAvailability: [] };
   }
 
-  // Month-relative day ranges: 1-7, 1-7;20-25, 15
-  const normalized = raw.replace(/\s/g, '');
+  // Month-relative day ranges: 1-7, 1-7;20-25, 5,12,15 or 3-7, 12-14
+  const normalized = raw.replace(/\s/g, '').replace(/,/g, ';');
   if (/^(\d+(-\d+)?)(;(\d+(-\d+)?))*$/i.test(normalized)) {
     return { nonAvailabilityInput: normalized, nonAvailability: [] };
   }
@@ -60,7 +60,7 @@ export function resolveNonAvailabilityForMonth(person, year, month) {
     const lastDay = getMonthDays(year, month).length;
     const ranges = [];
 
-    for (const part of input.split(';')) {
+    for (const part of input.split(/[;,]/)) {
       const t = part.trim().replace(/\s/g, '');
       if (!t) continue;
 

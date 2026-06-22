@@ -1,15 +1,16 @@
 /**
  * YouGotFireWatch Personnel Backup CSV
  *
- * non_availability column (month-relative when you generate):
- *   (blank) — available whole month
- *   all     — no duty assigned that month
- *   1-7     — unavailable the 1st through the 7th
- *   1-7;20-25 — multiple ranges
+ * Columns: rank, lastName, firstName, phoneNumber, studentType, points,
+ *          lastDutyDate, nonAvailability
+ *
+ * Legacy format with "name" column still supported on import.
  */
 
 import { generateId } from './dateUtils.js';
 import { parseNonAvailabilityColumn, formatNonAvailabilityForExport } from './nonAvailability.js';
+import { formatPersonName, parseLegacyName, normalizePerson } from './personnelUtils.js';
+import { formatDayNumberForDisplay } from './dayNumberAvailability.js';
 
 function csvField(val) {
   if (val == null || val === '') return '';
@@ -38,29 +39,37 @@ function parseCSVLine(line) {
   return result;
 }
 
+function formatNAForExport(person) {
+  const adnco = person.adncoNonAvailabilityInput?.trim();
+  if (adnco) return formatDayNumberForDisplay(adnco);
+  return formatNonAvailabilityForExport(person);
+}
+
 export function exportPersonnelBackup(personnel, settings) {
   const today = new Date().toISOString().split('T')[0];
   const lines = [
     '# YouGotFireWatch Personnel Backup',
-    '# version,1',
+    '# version,2',
     `# exported,${new Date().toISOString()}`,
     `# unit,${settings?.unitName || ''}`,
     '#',
-    '# Import before generating next month. non_availability uses day-of-month:',
-    '# blank = available all month | all = no duty | 1-7 = unavailable days 1-7 | 1-7;20-25 = multiple',
+    '# nonAvailability: blank=all month | all=no duty | 1-7 or 5,12-14 (day numbers)',
+    '# studentType: Academic or MAT (required for ADNCO rosters)',
     '#',
-    'rank,name,points,last_duty_date,section,notes,non_availability',
+    'rank,lastName,firstName,phoneNumber,studentType,points,lastDutyDate,nonAvailability',
   ];
 
   for (const p of personnel) {
+    const norm = normalizePerson(p);
     lines.push([
-      csvField(p.rank),
-      csvField(p.name),
-      p.points ?? 0,
-      csvField(p.lastDutyDate || ''),
-      csvField(p.section || ''),
-      csvField(p.notes || ''),
-      csvField(formatNonAvailabilityForExport(p)),
+      csvField(norm.rank),
+      csvField(norm.lastName),
+      csvField(norm.firstName),
+      csvField(norm.phoneNumber || ''),
+      csvField(norm.studentType || ''),
+      norm.points ?? 0,
+      csvField(norm.lastDutyDate || ''),
+      csvField(formatNAForExport(norm)),
     ].join(','));
   }
 
@@ -78,11 +87,14 @@ export function parsePersonnelBackupCSV(text) {
   }
 
   const headers = parseCSVLine(dataLines[0]).map((h) => h.toLowerCase().replace(/\s+/g, '_'));
-  const required = ['rank', 'name'];
-  for (const r of required) {
-    if (!headers.includes(r)) {
-      return { personnel: [], error: `Missing required column: ${r}` };
-    }
+  const hasNewFormat = headers.includes('lastname') && headers.includes('firstname');
+  const hasLegacy = headers.includes('name');
+
+  if (!hasNewFormat && !hasLegacy) {
+    return { personnel: [], error: 'Missing required columns: lastName & firstName (or legacy name)' };
+  }
+  if (!headers.includes('rank')) {
+    return { personnel: [], error: 'Missing required column: rank' };
   }
 
   const personnel = [];
@@ -95,23 +107,42 @@ export function parsePersonnelBackupCSV(text) {
     const row = {};
     headers.forEach((h, idx) => { row[h] = vals[idx] ?? ''; });
 
-    if (!row.rank || !row.name) {
+    let lastName = row.lastname?.trim() || '';
+    let firstName = row.firstname?.trim() || '';
+
+    if (!lastName && row.name) {
+      const parsed = parseLegacyName(row.name);
+      lastName = parsed.lastName;
+      firstName = parsed.firstName;
+    }
+
+    if (!row.rank || !lastName) {
       errors.push(`Row ${i + 1}: missing rank or name — skipped.`);
       continue;
     }
 
-    const na = parseNonAvailabilityColumn(row.non_availability);
-    personnel.push({
+    const studentType = row.studenttype?.trim();
+    const naRaw = row.nonavailability || row.non_availability || '';
+    const na = parseNonAvailabilityColumn(naRaw);
+
+    personnel.push(normalizePerson({
       id: generateId(),
       rank: row.rank.trim(),
-      name: row.name.trim(),
+      lastName,
+      firstName,
+      name: formatPersonName(lastName, firstName),
+      phoneNumber: row.phonenumber?.trim() || '',
+      studentType: studentType === 'Academic' || studentType === 'MAT' ? studentType : undefined,
       points: parseFloat(row.points) || 0,
-      lastDutyDate: row.last_duty_date?.trim() || null,
+      adncoPoints: parseFloat(row.points) || 0,
+      lastDutyDate: row.lastdutydate?.trim() || row.last_duty_date?.trim() || null,
+      lastAdncoDutyDate: row.lastdutydate?.trim() || row.last_duty_date?.trim() || null,
       section: row.section?.trim() || undefined,
       notes: row.notes?.trim() || undefined,
       nonAvailabilityInput: na.nonAvailabilityInput,
       nonAvailability: na.nonAvailability,
-    });
+      adncoNonAvailabilityInput: na.nonAvailabilityInput || '',
+    }));
   }
 
   if (!personnel.length) {
@@ -124,15 +155,14 @@ export function parsePersonnelBackupCSV(text) {
 export function getPersonnelBackupTemplate() {
   return [
     '# YouGotFireWatch Personnel Backup',
-    '# version,1',
+    '# version,2',
     '#',
-    'rank,name,points,last_duty_date,section,notes,non_availability',
-    'SSgt,"Martinez, J.",12,2026-05-28,Admin,,',
-    'Sgt,"Thompson, R.",18,2026-05-25,Operations,,1-5',
-    'Cpl,"Davis, M.",15,2026-05-22,Communications,TDY,20-25',
-    'PFC,"Anderson, S.",9,2026-05-29,Supply,,10-14',
-    'LCpl,"Johnson, A.",6,2026-05-31,Motor T,Leave,all',
-    'Cpl,"Williams, K.",8,2026-05-30,Supply,,',
-    'PFC,"Lee, D.",22,2026-05-20,Communications,Prime super candidate,',
+    'rank,lastName,firstName,phoneNumber,studentType,points,lastDutyDate,nonAvailability',
+    'SSgt,Martinez,Jose,831-555-1001,,12,2026-05-28,',
+    'Sgt,Thompson,Rachel,831-555-1002,MAT,18,2026-05-25,1-5',
+    'Cpl,Davis,Michael,831-555-1003,Academic,15,2026-05-22,"10-12, 18"',
+    'PFC,Anderson,Sarah,831-555-1004,MAT,9,2026-05-29,',
+    'LCpl,Johnson,Alex,831-555-1005,Academic,6,2026-05-31,all',
+    'PFC,Lee,Daniel,831-555-1006,,22,2026-05-20,',
   ].join('\n');
 }

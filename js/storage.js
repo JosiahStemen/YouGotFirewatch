@@ -34,6 +34,7 @@ export function loadAppState() {
     if (data.settings.unitName === '1st Battalion, Alpha Company') {
       data.settings.unitName = DEFAULT_SETTINGS.unitName;
     }
+    if (!data.adncoHistory) data.adncoHistory = [];
     return data;
   } catch { return null; }
 }
@@ -49,6 +50,7 @@ export function exportAppData(state) {
     personnel: state.personnel,
     settings: state.settings,
     history: state.history,
+    adncoHistory: state.adncoHistory ?? [],
   }, null, 2);
 }
 
@@ -59,6 +61,7 @@ export function importAppData(json) {
       personnel: data.personnel ?? [],
       settings: { ...DEFAULT_SETTINGS, ...data.settings },
       history: data.history ?? [],
+      adncoHistory: data.adncoHistory ?? [],
     };
   } catch { return null; }
 }
