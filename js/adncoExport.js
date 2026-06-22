@@ -11,8 +11,37 @@ function getXlsxLib() {
   return lib;
 }
 
-function isRealXlsx(bytes) {
-  return bytes?.byteLength > 4 && bytes[0] === 0x50 && bytes[1] === 0x4B && bytes[2] === 0x03 && bytes[3] === 0x04;
+function byteLen(data) {
+  if (!data) return 0;
+  if (typeof data.byteLength === 'number') return data.byteLength;
+  if (typeof data.length === 'number') return data.length;
+  return 0;
+}
+
+function normalizeToBytes(data) {
+  if (data instanceof Uint8Array) return data;
+  if (data instanceof ArrayBuffer) return new Uint8Array(data);
+  if (Array.isArray(data)) return new Uint8Array(data);
+  if (typeof data === 'string') {
+    const out = new Uint8Array(data.length);
+    for (let i = 0; i < data.length; i++) out[i] = data.charCodeAt(i) & 0xff;
+    return out;
+  }
+  throw new Error('Unexpected Excel output format from SheetJS');
+}
+
+function isZipArchive(bytes) {
+  const len = byteLen(bytes);
+  if (len < 4) return false;
+  return bytes[0] === 0x50 && bytes[1] === 0x4B;
+}
+
+function writeWorkbookBytes(XLSX, wb) {
+  const opts = { bookType: 'xlsx', type: 'uint8array' };
+  if (typeof XLSX.writeXLSX === 'function') {
+    return normalizeToBytes(XLSX.writeXLSX(wb, opts));
+  }
+  return normalizeToBytes(XLSX.write(wb, opts));
 }
 
 function openXlsxInNewTab(bytes, filename) {
@@ -108,8 +137,9 @@ function buildAdncoWorkbook(XLSX, roster, students, settings) {
 function buildAdncoXlsxBytes(roster, students, settings) {
   const XLSX = getXlsxLib();
   const wb = buildAdncoWorkbook(XLSX, roster, students, settings);
-  const bytes = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-  if (!isRealXlsx(bytes)) throw new Error('Generated file is not a valid .xlsx workbook');
+  const bytes = writeWorkbookBytes(XLSX, wb);
+  if (!byteLen(bytes)) throw new Error('Excel export produced an empty file');
+  if (!isZipArchive(bytes)) throw new Error('Excel export did not produce a valid .xlsx zip archive');
   return bytes;
 }
 
