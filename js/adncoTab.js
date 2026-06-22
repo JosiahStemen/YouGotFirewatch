@@ -2,7 +2,8 @@
  * ADNCO Student Rosters tab — fully separate from main duty roster
  */
 
-import { formatMonthYear } from './dateUtils.js';
+import { formatMonthYear, getCalendarGridOffset } from './dateUtils.js';
+import { getHolidayName } from './holidays.js';
 import {
   generateAdncoRoster, validateAdncoAssignment, finalizeAdncoRoster,
   createAdncoSlots, countAdncoStaffing, groupAdncoSlotsByDay, ADNCO_POSITIONS,
@@ -121,7 +122,10 @@ export function renderAdncoTab(ctx) {
   `;
 
   if (!ui.adncoGenerated || !roster) {
-    html += `<div class="info-box mb-4">🎲 <strong>Generate</strong> fills every position randomly. Students who have not yet been assigned this month are preferred. Re-generate to shuffle (check <em>Keep manual assignments</em> to lock edits).</div>
+    html += `<div class="card mb-4"><h3 class="mb-4 font-semibold">Month Overview — ${formatMonthYear(ui.adncoMonth, ui.adncoYear)}</h3>
+      <p class="text-sm text-muted mb-3">Same calendar layout as Generate OOD List. Each day needs 5 positions filled when you generate.</p>
+      ${renderAdncoMonthCalendar(ctx, slotSource, false)}</div>
+      <div class="info-box mb-4">🎲 <strong>Generate</strong> fills every position randomly. Students who have not yet been assigned this month are preferred. Re-generate to shuffle (check <em>Keep manual assignments</em> to lock edits).</div>
       <div class="text-center mt-4">
         <button class="btn btn-primary btn-lg" data-action="adnco-generate">⚡ Generate ADNCOs</button>
       </div>`;
@@ -146,6 +150,42 @@ export function renderAdncoTab(ctx) {
   }
 
   return html;
+}
+
+function renderAdncoMonthCalendar(ctx, slots, interactive) {
+  const { ui, esc } = ctx;
+  const days = groupAdncoSlotsByDay(slots);
+  const offset = getCalendarGridOffset(ui.adncoYear, ui.adncoMonth);
+  const cells = [...Array(offset).fill(null), ...days];
+  while (cells.length % 7) cells.push(null);
+
+  return `
+    <div class="cal-grid">
+      ${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => `<div class="cal-dow">${d}</div>`).join('')}
+      ${cells.map((day) => {
+        if (!day) return '<div class="cal-day empty"></div>';
+        const dayNum = parseInt(day.startDate.split('-')[2], 10);
+        const holiday = getHolidayName(day.startDate);
+        const typeClass = day.eligibleType === 'MAT' ? 'badge-mat' : 'badge-academic';
+        const filled = ADNCO_POSITIONS.filter((p) => day.positions[p.position]?.personId).length;
+        const total = ADNCO_POSITIONS.length;
+        const full = filled === total;
+        const partial = filled > 0 && filled < total;
+        return `<button type="button" class="cal-day adnco-cal-day ${full ? 'assigned' : partial ? 'has-note' : ''}" ${interactive ? `data-action="adnco-view-day" data-date="${day.startDate}"` : 'disabled style="cursor:default"'}>
+          <div class="flex justify-between items-start gap-1">
+            <span class="cal-day-num">${dayNum}</span>
+            ${filled > 0 ? `<span class="text-xs ${full ? 'text-olive' : 'text-amber'}" style="font-size:0.6rem">${filled}/${total}</span>` : ''}
+          </div>
+          <span class="${typeClass}" style="font-size:0.55rem;padding:0.05rem 0.25rem;margin-top:0.1rem;display:inline-block">${day.eligibleType === 'MAT' ? 'MAT' : 'AC'}</span>
+          ${holiday ? `<span class="text-xs text-gold" style="font-size:0.55rem">${holiday}</span>` : ''}
+        </button>`;
+      }).join('')}
+    </div>
+    <div class="cal-legend">
+      <span><span class="badge-mat" style="font-size:0.65rem">MAT</span> Sun–Thu nights</span>
+      <span><span class="badge-academic" style="font-size:0.65rem">AC</span> Fri–Sat nights</span>
+      <span>5 positions per night (829×2, 827×2, driver)</span>
+    </div>`;
 }
 
 function renderAdminWorkflow(ctx) {
@@ -192,6 +232,8 @@ function renderAdncoResults(ctx) {
         <button class="btn btn-secondary btn-sm" data-action="adnco-export-csv">📊 Export Roster CSV</button>
       </div>
     </div>
+    <div class="card mb-4"><h4 class="text-sm font-semibold text-muted mb-3">Visual Calendar — click a day to review positions</h4>
+      ${renderAdncoMonthCalendar(ctx, roster.slots, !readOnly)}</div>
     <div class="card"><div class="table-wrap"><table class="data adnco-table adnco-wide-table">
       <thead><tr>
         <th>Date &amp; Time</th><th>Type</th>${posHeaders}
@@ -268,6 +310,35 @@ export function handleAdncoClick(action, el, ctx) {
     case 'adnco-student-template':
       openCSVInNewTab(getStudentImportTemplate(), 'YouGotFireWatch-ADNCO-Student-Template.csv');
       return true;
+    case 'adnco-view-day': {
+      const { esc } = ctx;
+      if (!state.currentAdncoRoster) return true;
+      const startDate = el.dataset.date;
+      const day = groupAdncoSlotsByDay(state.currentAdncoRoster.slots).find((d) => d.startDate === startDate);
+      if (!day) return true;
+      const students = state.adncoStudents ?? [];
+      const map = new Map(students.map((p) => [p.id, p]));
+      const rows = ADNCO_POSITIONS.map((pos) => {
+        const slot = day.positions[pos.position];
+        const p = slot?.personId ? map.get(slot.personId) : null;
+        const eligible = students.filter((s) => s.studentType === day.eligibleType);
+        const readOnly = state.currentAdncoRoster.finalized;
+        return `<tr>
+          <td><strong>${pos.label}</strong></td>
+          <td>${p ? `${esc(p.rank)} ${esc(p.lastName)}, ${esc(p.firstName)}` : '<span class="text-amber">Unassigned</span>'}</td>
+          <td>${p?.phoneNumber ? esc(p.phoneNumber) : '—'}</td>
+          ${!readOnly && slot ? `<td><select class="input" style="font-size:0.75rem" data-action="adnco-reassign" data-slot-id="${slot.id}">
+            <option value="">Unassigned</option>
+            ${eligible.map((s) => `<option value="${s.id}" ${slot.personId === s.id ? 'selected' : ''}>${esc(adncoDisplayName(s))}</option>`).join('')}
+          </select></td>` : ''}
+        </tr>`;
+      }).join('');
+      ctx.openModal(`${day.timeLabel}`,
+        `<p class="text-sm text-muted mb-3"><span class="${day.eligibleType === 'MAT' ? 'badge-mat' : 'badge-academic'}">${day.eligibleType}</span> · 5 positions this night</p>
+         <div class="table-wrap"><table class="data"><thead><tr><th>Position</th><th>Assigned</th><th>Phone</th>${!state.currentAdncoRoster.finalized ? '<th>Change</th>' : ''}</tr></thead><tbody>${rows}</tbody></table></div>`,
+        `<button class="btn btn-primary" data-action="close-modal" style="width:100%">Done</button>`, 'lg');
+      return true;
+    }
     case 'adnco-show-finalize':
       openModal('Finalize ADNCO Roster',
         `<p class="text-sm text-muted mb-3">Saves only to ADNCO history — does not affect main Personnel or OOD rosters.</p>

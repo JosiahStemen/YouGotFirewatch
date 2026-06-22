@@ -24,6 +24,8 @@ import {
   renderAdncoTab, handleAdncoClick, handleAdncoChange, createAdncoUiDefaults, initAdncoSlots,
 } from './adncoTab.js';
 
+export const APP_VERSION = '2026.06.22';
+
 // ─── State ───────────────────────────────────────────────────────────────────
 let state = {
   personnel: [],
@@ -170,7 +172,7 @@ function render() {
       ).join('')}
     </nav>
     <main class="main">${renderTab()}</main>
-    <footer class="footer">YouGotFireWatch — Fair fire watch roster generator. All data stored locally in your browser.</footer>
+    <footer class="footer">YouGotFireWatch v${APP_VERSION} — Fair fire watch roster generator. All data stored locally in your browser.</footer>
     ${ui.modal ? renderModal() : ''}
   `;
 }
