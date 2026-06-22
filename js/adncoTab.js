@@ -13,7 +13,7 @@ import {
   exportAdncoStudentsCSV,
 } from './studentImport.js';
 import { createSampleAdncoStudents } from './sampleData.js';
-import { DAY_NUMBER_PLACEHOLDER, DAY_NUMBER_HINT } from './dayNumberAvailability.js';
+import { DAY_NUMBER_HINT } from './dayNumberAvailability.js';
 import { adncoDisplayName } from './personnelUtils.js';
 import { openCSVInNewTab } from './export.js';
 
@@ -25,8 +25,6 @@ export function createAdncoUiDefaults() {
     adncoGenerated: false,
     adncoWarnings: [],
     adncoKeepManual: false,
-    adncoSelfServiceId: '',
-    adncoNaDraft: '',
     viewingAdncoHistory: null,
   };
 }
@@ -85,7 +83,7 @@ export function renderAdncoTab(ctx) {
       <p class="text-xs text-muted mt-1">Staffing: ${staffing.matStudents} MAT students / ${staffing.matSlots} MAT slots · ${staffing.acStudents} Academic / ${staffing.acSlots} Academic slots</p>
     </div>
 
-    ${renderSelfService(ctx)}
+    ${renderAdminWorkflow(ctx)}
 
     <div class="flex flex-wrap gap-2 mb-4">
       <button class="btn btn-secondary btn-sm" data-action="adnco-import-students">⬆ Import Students</button>
@@ -121,30 +119,18 @@ export function renderAdncoTab(ctx) {
   return html;
 }
 
-function renderSelfService(ctx) {
-  const { state, ui, esc } = ctx;
-  const students = [...(state.adncoStudents ?? [])].sort((a, b) => adncoDisplayName(a).localeCompare(adncoDisplayName(b)));
-  const selected = students.find((p) => p.id === ui.adncoSelfServiceId);
-  const naVal = ui.adncoNaDraft !== '' ? ui.adncoNaDraft : (selected?.adncoNonAvailabilityInput ?? '');
-
-  return `<div class="card adnco-self-service mb-4">
-    <h3 class="font-semibold mb-2">📱 Quick Availability Update</h3>
-    <p class="text-sm text-muted mb-3">Marines: pick your name and enter <strong>only day numbers</strong> for ${formatMonthYear(ui.adncoMonth, ui.adncoYear)}. No dates, no calendars.</p>
-    <div class="grid-2 gap-3 mb-3">
-      <div>
-        <label class="label">I am...</label>
-        <select class="input" data-action="adnco-self-select">
-          <option value="">Select your name...</option>
-          ${students.map((p) => `<option value="${p.id}" ${ui.adncoSelfServiceId === p.id ? 'selected' : ''}>${esc(adncoDisplayName(p))} (${p.studentType})</option>`).join('')}
-        </select>
-      </div>
-      <div>
-        <label class="label">Days I <em>cannot</em> stand duty</label>
-        <input class="input input-lg adnco-na-input" data-action="adnco-na-draft" value="${esc(naVal)}" placeholder="${DAY_NUMBER_PLACEHOLDER}" ${!ui.adncoSelfServiceId ? 'disabled' : ''}>
-      </div>
-    </div>
-    <p class="hint mb-3">${DAY_NUMBER_HINT}</p>
-    <button class="btn btn-primary" data-action="adnco-save-availability" ${!ui.adncoSelfServiceId ? 'disabled' : ''}>Update My Availability</button>
+function renderAdminWorkflow(ctx) {
+  const { ui } = ctx;
+  return `<div class="card adnco-admin-workflow mb-4">
+    <h3 class="font-semibold mb-2">📋 Monthly Availability (admin)</h3>
+    <p class="text-sm text-muted mb-3">Non-availability is set in the student CSV only — not in the app. Export the list each month, edit the <strong>nonAvailability</strong> column for ${formatMonthYear(ui.adncoMonth, ui.adncoYear)}, then re-import before generating.</p>
+    <ol class="text-sm text-muted" style="margin:0 0 0.75rem 1.25rem;line-height:1.6">
+      <li><strong>Export Student List</strong> (or use last month&apos;s export after finalize)</li>
+      <li>Edit <strong>nonAvailability</strong> — day numbers only, e.g. <code>5, 12-14, 20</code></li>
+      <li><strong>Import Students</strong> to load the updated file</li>
+      <li><strong>Generate ADNCO Roster</strong></li>
+    </ol>
+    <p class="hint mb-0">${DAY_NUMBER_HINT}</p>
   </div>`;
 }
 
@@ -256,16 +242,6 @@ export function handleAdncoClick(action, el, ctx) {
     case 'adnco-student-template':
       openCSVInNewTab(getStudentImportTemplate(), 'YouGotFireWatch-ADNCO-Student-Template.csv');
       return true;
-    case 'adnco-save-availability': {
-      if (!ui.adncoSelfServiceId) return true;
-      const idx = (state.adncoStudents ?? []).findIndex((p) => p.id === ui.adncoSelfServiceId);
-      if (idx < 0) return true;
-      state.adncoStudents[idx].adncoNonAvailabilityInput = ui.adncoNaDraft.trim();
-      persist();
-      toast('Your availability was updated!');
-      render();
-      return true;
-    }
     case 'adnco-show-finalize':
       openModal('Finalize ADNCO Roster',
         `<p class="text-sm text-muted mb-3">Saves only to ADNCO history — does not affect main Personnel or duty rosters.</p>
@@ -332,13 +308,6 @@ export function handleAdncoChange(action, el, ctx) {
     ui.adncoKeepManual = el.checked;
     return true;
   }
-  if (action === 'adnco-self-select') {
-    ui.adncoSelfServiceId = el.value;
-    const p = (state.adncoStudents ?? []).find((x) => x.id === el.value);
-    ui.adncoNaDraft = p?.adncoNonAvailabilityInput ?? '';
-    render();
-    return true;
-  }
   if (action === 'adnco-reassign') {
     const slotId = el.dataset.slotId;
     const personId = el.value || null;
@@ -354,14 +323,6 @@ export function handleAdncoChange(action, el, ctx) {
     );
     persist();
     render();
-    return true;
-  }
-  return false;
-}
-
-export function handleAdncoInput(action, el, ctx) {
-  if (action === 'adnco-na-draft') {
-    ctx.ui.adncoNaDraft = el.value;
     return true;
   }
   return false;

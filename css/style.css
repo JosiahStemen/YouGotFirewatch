@@ -229,8 +229,7 @@ table.data tr:hover { background: rgba(26,35,50,0.3); }
 /* ADNCO Student Rosters */
 .adnco-header { border-left: 3px solid var(--gold-400); padding-left: 1rem; }
 .adnco-rules { border-color: rgba(201,162,39,0.25); background: rgba(201,162,39,0.04); }
-.adnco-self-service { border-color: rgba(107,124,62,0.4); background: rgba(107,124,62,0.06); }
-.adnco-na-input { font-size: 1.125rem !important; padding: 0.75rem 1rem !important; }
+.adnco-admin-workflow { border-color: rgba(107,124,62,0.35); background: rgba(107,124,62,0.05); }
 .input-lg { min-height: 2.75rem; }
 .badge-mat { display: inline-block; background: rgba(59,130,246,0.2); color: #93c5fd; border: 1px solid rgba(59,130,246,0.4); padding: 0.15rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem; font-weight: 600; }
 .badge-academic { display: inline-block; background: rgba(251,191,36,0.15); color: var(--amber); border: 1px solid rgba(251,191,36,0.35); padding: 0.15rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem; font-weight: 600; }

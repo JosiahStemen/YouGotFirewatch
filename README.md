@@ -59,9 +59,9 @@ A **separate tab** for Academic and MAT student ADNCO duty — independent from 
 - Fields: `phoneNumber`, `studentType` (Academic or MAT), `lastName`, `firstName`
 - CSV columns: `rank, lastName, firstName, phoneNumber, studentType, points, lastDutyDate, nonAvailability`
 
-**Simple non-availability (for junior Marines):**
+**Non-availability (admin CSV only):**
 
-Use **only day numbers** for the month — no calendars, no full dates.
+Set in the student export — not in the app. Use **only day numbers** for the month:
 
 | You type | Meaning |
 |----------|---------|
@@ -69,20 +69,13 @@ Use **only day numbers** for the month — no calendars, no full dates.
 | `3-7, 12-14` | Cannot stand duty the 3rd–7th and 12th–14th |
 | `10-12, 18, 25-27` | Multiple ranges |
 
-**How Marines update availability:**
-1. Open the **ADNCO Student Rosters** tab
-2. In **Quick Availability Update**, select your name
-3. Type day numbers in the big text box (example: `5, 12-14, 20-22`)
-4. Click **Update My Availability**
-
-**Generating an ADNCO roster:**
-1. In **ADNCO Student Rosters**, import students (or load samples) with `studentType` set to Academic or MAT
-2. Pick month/year
-3. Click **Generate ADNCO Roster**
-4. Review assignments (phone numbers shown prominently)
-5. **Finalize** — saved separately from main duty history; opens a printable roster
-
-Import students via **Import Students** (CSV template available) or the shared Personnel tab.
+**Monthly workflow:**
+1. **Export Student List** (or reuse last month's export after finalize)
+2. Edit **nonAvailability** in the CSV for the target month
+3. **Import Students** to load the updated file
+4. Pick month/year and **Generate ADNCO Roster**
+5. Review assignments (phone numbers shown prominently)
+6. **Finalize** — saved separately from main duty history; opens a printable roster
 
 ## Data & Security
 

@@ -21,7 +21,7 @@ import {
   resolvePersonnelForMonth, parseNonAvailabilityColumn,
 } from './nonAvailability.js';
 import {
-  renderAdncoTab, handleAdncoClick, handleAdncoChange, handleAdncoInput, createAdncoUiDefaults,
+  renderAdncoTab, handleAdncoClick, handleAdncoChange, createAdncoUiDefaults,
 } from './adncoTab.js';
 
 // ─── State ───────────────────────────────────────────────────────────────────
@@ -578,7 +578,7 @@ function handleInput(e) {
   else if (el.dataset?.action === 'settings-baseline') {
     ui.settingsDraft.baselines[el.dataset.key] = parseFloat(el.value) || 0;
   }
-  else if (handleAdncoInput(el.dataset?.action, el, adncoCtx())) { /* draft saved */ }
+
 }
 
 function handleSubmit(e) {

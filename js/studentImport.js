@@ -38,7 +38,7 @@ export function getStudentImportTemplate() {
     '# YouGotFireWatch ADNCO Student Roster',
     '# Completely separate from main duty personnel backup',
     '# studentType must be Academic or MAT',
-    '# nonAvailability: simple day numbers — 5, 12-14, 20',
+    '# nonAvailability: admin edits in CSV each month — day numbers only, e.g. 5, 12-14, 20',
     'rank,lastName,firstName,phoneNumber,studentType,points,lastDutyDate,nonAvailability',
     'LCpl,Garcia,Luis,831-555-0101,MAT,4,,',
     'Cpl,Anderson,Sarah,831-555-0102,Academic,6,,"10-12, 18"',
