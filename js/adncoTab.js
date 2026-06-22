@@ -35,10 +35,10 @@ export function renderAdncoTab(ctx) {
 
   if (!students.length) {
     return `<div class="adnco-header mb-4">
-      <h2 style="font-size:1.25rem;font-weight:600">ADNCO Student Rosters</h2>
-      <p class="text-sm text-muted">Completely separate from Personnel and main fire watch duty</p>
+      <h2 style="font-size:1.25rem;font-weight:600">Generate ADNCOs</h2>
+      <p class="text-sm text-muted">Completely separate from Personnel and main OOD duty</p>
     </div>
-    <div class="empty-state"><div class="empty-icon">🎓</div><h3>No ADNCO Students Yet</h3>
+    <div class="empty-state"><div class="empty-icon">🎓</div><h3>No Students Yet</h3>
       <p>Import a student CSV or load sample students. This does not use the main Personnel list.</p>
       <div class="flex gap-3 justify-center flex-wrap">
         <button class="btn btn-primary" data-action="adnco-import-students">Import Student CSV</button>
@@ -59,7 +59,7 @@ export function renderAdncoTab(ctx) {
     <div class="adnco-header mb-4">
       <div class="flex flex-wrap justify-between items-center gap-4">
         <div>
-          <h2 style="font-size:1.25rem;font-weight:600">ADNCO Student Rosters</h2>
+          <h2 style="font-size:1.25rem;font-weight:600">Generate ADNCOs</h2>
           <p class="text-sm text-muted">${students.length} student${students.length !== 1 ? 's' : ''} · independent from main Personnel tab</p>
         </div>
         <div class="flex gap-2 flex-wrap">
@@ -94,7 +94,7 @@ export function renderAdncoTab(ctx) {
 
   if (!ui.adncoGenerated || !roster) {
     html += `<div class="text-center mt-4">
-      <button class="btn btn-primary btn-lg" data-action="adnco-generate">⚡ Generate ADNCO Roster</button>
+      <button class="btn btn-primary btn-lg" data-action="adnco-generate">⚡ Generate ADNCOs</button>
     </div>`;
   } else {
     if (ui.adncoWarnings.length) {
@@ -128,7 +128,7 @@ function renderAdminWorkflow(ctx) {
       <li><strong>Export Student List</strong> (or use last month&apos;s export after finalize)</li>
       <li>Edit <strong>nonAvailability</strong> — day numbers only, e.g. <code>5, 12-14, 20</code></li>
       <li><strong>Import Students</strong> to load the updated file</li>
-      <li><strong>Generate ADNCO Roster</strong></li>
+      <li><strong>Generate ADNCOs</strong></li>
     </ol>
     <p class="hint mb-0">${DAY_NUMBER_HINT}</p>
   </div>`;

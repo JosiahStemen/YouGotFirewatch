@@ -164,7 +164,7 @@ function render() {
     <nav class="tabs">
       ${['personnel','generate','adnco','history','settings'].map((t) =>
         `<button class="tab-btn ${state.activeTab === t ? 'active' : ''}" data-action="tab" data-tab="${t}">${
-          {personnel:'👥 Personnel',generate:'📅 Generate Roster',adnco:'🎓 ADNCO Students',history:'📋 History',settings:'⚙️ Settings'}[t]
+          {personnel:'👥 Personnel',generate:'📅 Generate OOD List',adnco:'🎓 Generate ADNCOs',history:'📋 History',settings:'⚙️ Settings'}[t]
         }</button>`
       ).join('')}
     </nav>
@@ -291,7 +291,7 @@ function renderGenerate() {
 
   let html = `
     <div class="flex flex-wrap justify-between items-center gap-4 mb-4">
-      <div><h2 style="font-size:1.25rem;font-weight:600">Generate Roster</h2>
+      <div><h2 style="font-size:1.25rem;font-weight:600">Generate OOD List</h2>
         <p class="text-sm text-muted">Configure hardship points, then generate a fair two-phase assignment</p>
         <p class="text-sm ${staffingOk ? 'text-olive' : 'text-amber'} mt-1">${dutyEligible} duty-eligible / ${monthDays} days this month${staffingOk ? ' — staffing OK' : ' — short-staffed; weekdays may not fill'}</p></div>
       <div class="flex gap-2">
@@ -307,7 +307,7 @@ function renderGenerate() {
   if (!ui.generated) {
     html += `<div class="card"><h3 class="mb-4 font-semibold">Calendar Editor — ${formatMonthYear(ui.genMonth, ui.genYear)}</h3>
       ${renderCalendar(ui.slots, false)}</div>
-      <div class="text-center mt-4"><button class="btn btn-primary btn-lg" data-action="generate">⚡ Generate Fair Roster</button></div>`;
+      <div class="text-center mt-4"><button class="btn btn-primary btn-lg" data-action="generate">⚡ Generate OOD List</button></div>`;
   } else if (roster) {
     if (ui.warnings.length) {
       html += `<div class="card card-amber"><strong class="text-amber">⚠ Assignment Warnings</strong><ul class="text-sm mt-2">${ui.warnings.map((w)=>`<li>• ${esc(w)}</li>`).join('')}</ul></div>`;

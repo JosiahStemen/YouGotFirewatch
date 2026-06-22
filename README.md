@@ -47,7 +47,7 @@ Then open `http://localhost:8080`
 - Personnel Backup CSV — import before generating, auto-export after finalize
 - CSV export + Print/PDF (via browser print dialog)
 
-### ADNCO Student Rosters (new)
+### Generate ADNCOs (new)
 A **separate tab** for Academic and MAT student ADNCO duty — independent from the main fire watch roster.
 
 **Duty windows (hard rules):**
@@ -55,7 +55,7 @@ A **separate tab** for Academic and MAT student ADNCO duty — independent from 
 - **Academic** — Friday 1630 through Sunday 1630 (no duty the night before a class day)
 
 **Student list (completely separate from main Personnel):**
-- Managed only in the **ADNCO Student Rosters** tab — not the Personnel tab
+- Managed only in the **Generate ADNCOs** tab — not the Personnel tab
 - Fields: `phoneNumber`, `studentType` (Academic or MAT), `lastName`, `firstName`
 - CSV columns: `rank, lastName, firstName, phoneNumber, studentType, points, lastDutyDate, nonAvailability`
 
@@ -73,7 +73,7 @@ Set in the student export — not in the app. Use **only day numbers** for the m
 1. **Export Student List** (or reuse last month's export after finalize)
 2. Edit **nonAvailability** in the CSV for the target month
 3. **Import Students** to load the updated file
-4. Pick month/year and **Generate ADNCO Roster**
+4. Pick month/year and click **Generate ADNCOs**
 5. Review assignments (phone numbers shown prominently)
 6. **Finalize** — saved separately from main duty history; opens a printable roster
 
