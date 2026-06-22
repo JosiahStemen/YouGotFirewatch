@@ -25,7 +25,7 @@ import {
 } from './adncoTab.js';
 import { normalizeStudentList } from './personnelUtils.js';
 
-export const APP_VERSION = '2026.06.24b';
+export const APP_VERSION = '2026.06.24c';
 
 // ─── State ───────────────────────────────────────────────────────────────────
 let state = {
@@ -526,7 +526,7 @@ function handleClick(e) {
   switch (action) {
     case 'tab': state.activeTab = el.dataset.tab === 'personnel' ? 'generate' : el.dataset.tab; render(); break;
     case 'show-help': showHelpModal(); break;
-    case 'close-modal': closeModal(); break;
+    case 'close-modal': ui.adncoModalDate = null; closeModal(); break;
     case 'close-modal-overlay':
       if (e.target === el) closeModal();
       break;

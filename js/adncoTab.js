@@ -29,6 +29,7 @@ export function createAdncoUiDefaults() {
     adncoWarnings: [],
     adncoKeepManual: false,
     adncoSlots: [],
+    adncoModalDate: null,
     viewingAdncoHistory: null,
   };
 }
@@ -49,6 +50,24 @@ function adncoSlotsRef(ctx) {
 function getAdncoPeriodNote(period) {
   const slot = period.positions['827-1'] ?? Object.values(period.positions)[0];
   return slot?.note;
+}
+
+function openAdncoDayModal(ctx, startDate) {
+  const { state, ui, esc, openModal } = ctx;
+  const slots = adncoSlotsRef(ctx);
+  const periods = groupAdncoSlotsByDay(slots).filter((d) => d.startDate === startDate);
+  if (!periods.length) return;
+  const students = state.adncoStudents ?? [];
+  const map = new Map(students.map((p) => [p.id, p]));
+  const readOnly = state.currentAdncoRoster?.finalized === true;
+  const title = parseDate(startDate).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+  const body = periods.map((p) => renderPeriodSection(p, students, map, readOnly, esc)).join('');
+  ui.adncoModalDate = startDate;
+  openModal(title, body,
+    readOnly
+      ? `<button class="btn btn-primary" data-action="close-modal" style="width:100%">Done</button>`
+      : `<button class="btn btn-secondary" data-action="close-modal">Cancel</button>
+         <button class="btn btn-primary" data-action="adnco-save-day" data-date="${startDate}">Save</button>`, 'lg');
 }
 
 function renderPeriodSection(period, students, map, readOnly, esc) {
@@ -393,21 +412,7 @@ export function handleAdncoClick(action, el, ctx) {
       openCSVInNewTab(getStudentImportTemplate(), 'YouGotFireWatch-ADNCO-Student-Template.csv');
       return true;
     case 'adnco-view-day': {
-      const { esc } = ctx;
-      const startDate = el.dataset.date;
-      const slots = adncoSlotsRef(ctx);
-      const periods = groupAdncoSlotsByDay(slots).filter((d) => d.startDate === startDate);
-      if (!periods.length) return true;
-      const students = state.adncoStudents ?? [];
-      const map = new Map(students.map((p) => [p.id, p]));
-      const readOnly = state.currentAdncoRoster?.finalized;
-      const title = parseDate(startDate).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
-      const body = periods.map((p) => renderPeriodSection(p, students, map, readOnly, esc)).join('');
-      ctx.openModal(title, body,
-        readOnly
-          ? `<button class="btn btn-primary" data-action="close-modal" style="width:100%">Done</button>`
-          : `<button class="btn btn-secondary" data-action="close-modal">Cancel</button>
-             <button class="btn btn-primary" data-action="adnco-save-day" data-date="${startDate}">Save</button>`, 'lg');
+      openAdncoDayModal(ctx, el.dataset.date);
       return true;
     }
     case 'adnco-save-day': {
@@ -432,6 +437,7 @@ export function handleAdncoClick(action, el, ctx) {
       });
       ui.adncoSlots = slots;
       syncAdncoSlots(ctx);
+      ui.adncoModalDate = null;
       closeModal();
       render();
       return true;
@@ -521,11 +527,10 @@ export function handleAdncoChange(action, el, ctx) {
     ui.adncoSlots = applyPeriodEligibleType(
       ui.adncoSlots, startDate, periodId, newType, state.adncoStudents ?? []
     );
-    if (state.currentAdncoRoster) {
-      state.currentAdncoRoster.slots = ui.adncoSlots;
-    }
+    syncAdncoSlots(ctx);
     persist();
-    render();
+    openAdncoDayModal(ctx, startDate);
+    ctx.toast(`Period set to ${newType}`);
     return true;
   }
   if (action === 'adnco-reassign') {
@@ -541,11 +546,13 @@ export function handleAdncoChange(action, el, ctx) {
     ui.adncoSlots = ui.adncoSlots.map((s) =>
       s.id === slotId ? { ...s, personId } : s
     );
-    if (state.currentAdncoRoster) {
-      state.currentAdncoRoster.slots = ui.adncoSlots;
-    }
+    syncAdncoSlots(ctx);
     persist();
-    render();
+    if (ui.adncoModalDate) {
+      openAdncoDayModal(ctx, ui.adncoModalDate);
+    } else {
+      render();
+    }
     return true;
   }
   return false;

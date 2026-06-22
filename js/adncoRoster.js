@@ -34,10 +34,20 @@ export function hasDriversLicense(person) {
 
 export function personEligibleForAdncoSlot(person, slot) {
   if (!person || !slot) return false;
+  // All positions — including Duty Driver — require matching MAT or Academic for this period
   if (person.studentType !== slot.eligibleType) return false;
   if (slot.position === '827-1' && !isLcplRank(person.rank)) return false;
   if (slot.position === 'driver' && !hasDriversLicense(person)) return false;
   return true;
+}
+
+export function purgeInvalidSlotAssignments(slots, students) {
+  return (slots ?? []).map((s) => {
+    if (!s.personId) return s;
+    const person = (students ?? []).find((p) => p.id === s.personId);
+    if (person && personEligibleForAdncoSlot(person, s)) return s;
+    return { ...s, personId: null };
+  });
 }
 
 export function getEligibleStudentsForSlot(slot, students) {
@@ -339,6 +349,8 @@ export function generateAdncoRoster(year, month, students, existingRoster, keepM
     slots = slots.map((s) => ({ ...s, personId: null }));
   }
 
+  slots = purgeInvalidSlotAssignments(slots, students);
+
   const assignmentCount = new Map();
   for (const s of slots) {
     if (s.personId) {
@@ -440,11 +452,19 @@ export function validateAdncoAssignment(personId, slotId, roster, students, year
     };
   }
 
-  if (slot.position === 'driver' && !hasDriversLicense(person)) {
-    return {
-      valid: false,
-      message: `${person.rank} ${person.lastName || person.name} does not have a driver's license (driversLicense must be Y in the student CSV).`,
-    };
+  if (slot.position === 'driver') {
+    if (!hasDriversLicense(person)) {
+      return {
+        valid: false,
+        message: `${person.rank} ${person.lastName || person.name} does not have a driver's license (driversLicense must be Y in the student CSV).`,
+      };
+    }
+    if (person.studentType !== slot.eligibleType) {
+      return {
+        valid: false,
+        message: `Duty Driver on this period requires a ${slot.eligibleType} student with a license. ${person.rank} ${person.lastName || person.name} is ${person.studentType}.`,
+      };
+    }
   }
 
   const slotPeriodId = slot.periodId ?? inferLegacyPeriodId(slot.startDate);
