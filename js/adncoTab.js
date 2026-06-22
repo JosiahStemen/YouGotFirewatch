@@ -617,26 +617,28 @@ export function handleAdncoClick(action, el, ctx) {
       state.currentAdncoRoster = finalized;
       closeModal();
       persist();
-      const excelDownloaded = downloadAdncoExcel(finalized, state.adncoStudents, state.settings);
       const studentExport = exportAdncoStudentsCSV(state.adncoStudents ?? []);
       const csvOpened = openCSVInNewTab(studentExport.content, studentExport.filename);
-      if (excelDownloaded && csvOpened) {
-        toast('Finalized! Excel roster downloaded + student CSV opened.');
-      } else if (excelDownloaded) {
-        toast('Finalized! Excel downloaded. Allow pop-ups for student CSV too.');
-      } else if (csvOpened) {
-        toast('Student CSV opened. Use Download Excel in the roster view if needed.');
-      } else {
-        toast('Finalized! Use Export buttons if downloads were blocked.');
-      }
-      render();
+      downloadAdncoExcel(finalized, state.adncoStudents, state.settings).then((excelDownloaded) => {
+        if (excelDownloaded && csvOpened) {
+          toast('Finalized! .xlsx roster downloaded + student CSV opened.');
+        } else if (excelDownloaded) {
+          toast('Finalized! .xlsx downloaded. Allow pop-ups for student CSV too.');
+        } else if (csvOpened) {
+          toast('Student CSV opened. Use Download Excel if the .xlsx failed.');
+        } else {
+          toast('Finalized! Use Export buttons if downloads were blocked.');
+        }
+        render();
+      });
       return true;
     }
     case 'adnco-export-excel': {
       const roster = state.currentAdncoRoster ?? ui.viewingAdncoHistory;
       if (roster) {
-        downloadAdncoExcel(roster, state.adncoStudents ?? [], state.settings);
-        toast('Excel roster downloaded');
+        downloadAdncoExcel(roster, state.adncoStudents ?? [], state.settings).then((ok) => {
+          if (ok) toast('.xlsx roster downloaded');
+        });
       }
       return true;
     }

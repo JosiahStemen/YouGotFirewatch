@@ -1,6 +1,28 @@
-import XLSX from './vendor/xlsx.mjs';
 import { formatMonthYear } from './dateUtils.js';
 import { groupAdncoSlotsByDay, ADNCO_POSITIONS } from './adncoRoster.js';
+
+const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+let xlsxLoadPromise = null;
+
+function loadXlsx() {
+  if (!xlsxLoadPromise) {
+    xlsxLoadPromise = import('./vendor/xlsx.js').then((mod) => mod.default ?? mod);
+  }
+  return xlsxLoadPromise;
+}
+
+function triggerBlobDownload(data, filename, mime) {
+  const blob = new Blob([data], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
 
 function personCell(p) {
   if (!p) return '';
@@ -13,7 +35,7 @@ function personExcelValue(p) {
   return p.phoneNumber ? `${name}\n${p.phoneNumber}` : name;
 }
 
-function buildAdncoWorkbook(roster, students, settings) {
+function buildAdncoWorkbook(XLSX, roster, students, settings) {
   const map = new Map((students ?? []).map((p) => [p.id, p]));
   const days = groupAdncoSlotsByDay(roster.slots);
   const monthLabel = formatMonthYear(roster.month, roster.year);
@@ -80,12 +102,23 @@ export function exportAdncoCSV(roster, students, settings) {
   return lines.join('\n');
 }
 
-/** Download a formatted Excel workbook (.xlsx) for MAT platoon to complete manually. */
+/** Download a real .xlsx workbook (Office Open XML) for MAT platoon to complete manually. */
 export function downloadAdncoExcel(roster, students, settings) {
-  const wb = buildAdncoWorkbook(roster, students, settings);
   const filename = `YouGotFireWatch-ADNCO-${roster.year}-${String(roster.month).padStart(2, '0')}.xlsx`;
-  XLSX.writeFile(wb, filename);
-  return true;
+
+  return loadXlsx()
+    .then((XLSX) => {
+      const wb = buildAdncoWorkbook(XLSX, roster, students, settings);
+      const bytes = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+      if (!bytes?.byteLength) throw new Error('Excel file was empty');
+      triggerBlobDownload(bytes, filename, XLSX_MIME);
+      return true;
+    })
+    .catch((err) => {
+      console.error('ADNCO Excel export failed:', err);
+      alert(`Could not create Excel file: ${err.message}\n\nTry a hard refresh (Ctrl+F5), then finalize again.`);
+      return false;
+    });
 }
 
 export function openAdncoPrintout(roster, students, settings) {
