@@ -1,3 +1,4 @@
+import XLSX from './vendor/xlsx.mjs';
 import { formatMonthYear } from './dateUtils.js';
 import { groupAdncoSlotsByDay, ADNCO_POSITIONS } from './adncoRoster.js';
 
@@ -6,94 +7,54 @@ function personCell(p) {
   return `${p.rank} ${p.lastName}, ${p.firstName}${p.phoneNumber ? ` (${p.phoneNumber})` : ''}`;
 }
 
-function excelAssigneeCell(p, isMat) {
-  if (!p) {
-    return isMat ? '' : '<em>Unassigned</em>';
-  }
-  const phone = p.phoneNumber
-    ? `<br><span style="font-size:10pt;color:#374151">${escapeHtml(p.phoneNumber)}</span>`
-    : '';
-  return `${escapeHtml(p.rank)} ${escapeHtml(p.lastName)}, ${escapeHtml(p.firstName)}${phone}`;
+function personExcelValue(p) {
+  if (!p) return '';
+  const name = `${p.rank} ${p.lastName}, ${p.firstName}`;
+  return p.phoneNumber ? `${name}\n${p.phoneNumber}` : name;
 }
 
-function escapeHtml(s) {
-  return String(s ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
-function buildAdncoExcelHtml(roster, students, settings) {
+function buildAdncoWorkbook(roster, students, settings) {
   const map = new Map((students ?? []).map((p) => [p.id, p]));
   const days = groupAdncoSlotsByDay(roster.slots);
   const monthLabel = formatMonthYear(roster.month, roster.year);
-  const unit = escapeHtml(settings?.unitName || 'YouGotFireWatch');
+  const unit = settings?.unitName || 'YouGotFireWatch';
   const generated = new Date().toLocaleString();
-  const posHeaders = ADNCO_POSITIONS.map((p) =>
-    `<th style="background:#1a2332;color:#ffffff;font-weight:bold;border:1px solid #9ca3af;padding:8px 10px;text-align:center;font-family:Arial,sans-serif;font-size:11pt">${escapeHtml(p.label)}</th>`
-  ).join('');
+  const colCount = 2 + ADNCO_POSITIONS.length;
 
-  const rows = days.map((day) => {
+  const rows = [
+    [`${monthLabel} ADNCO Roster`],
+    [`${unit} · Generated ${generated}${roster.finalized ? ' · FINALIZED' : ''}`],
+    ['Positions (in order): Bldg 827 (DNCO, LCpl) · Bldg 827 #2 · Bldg 829 #1 · Bldg 829 #2 · Duty Driver (licensed)'],
+    ['Academic rows are auto-filled. MAT rows are left blank for MAT platoon to complete.'],
+    [],
+    ['Date & Time', 'Type', ...ADNCO_POSITIONS.map((p) => p.label)],
+  ];
+
+  for (const day of days) {
     const isMat = day.eligibleType === 'MAT';
-    const rowClass = isMat ? 'mat-row' : 'academic-row';
-    const typeBg = isMat ? '#dbeafe' : '#fef3c7';
-    const typeColor = isMat ? '#1e40af' : '#92400e';
-    const cells = ADNCO_POSITIONS.map((pos) => {
+    const posCells = ADNCO_POSITIONS.map((pos) => {
       const slot = day.positions[pos.position];
       const p = slot?.personId ? map.get(slot.personId) : null;
-      const cellBg = isMat ? '#fffbeb' : (p ? '#f0fdf4' : '#fef2f2');
-      const border = isMat ? '2px solid #f59e0b' : '1px solid #d1d5db';
-      return `<td style="background:${cellBg};border:${border};padding:8px 10px;vertical-align:top;font-family:Arial,sans-serif;font-size:11pt;min-width:120px">${excelAssigneeCell(p, isMat)}</td>`;
-    }).join('');
-    return `<tr class="${rowClass}">
-      <td style="border:1px solid #d1d5db;padding:8px 10px;white-space:nowrap;font-family:Arial,sans-serif;font-size:11pt;font-weight:600">${escapeHtml(day.timeLabel)}</td>
-      <td style="background:${typeBg};color:${typeColor};border:1px solid #d1d5db;padding:8px 10px;font-weight:bold;text-align:center;font-family:Arial,sans-serif;font-size:11pt">${day.eligibleType}</td>
-      ${cells}
-    </tr>`;
-  }).join('');
+      if (isMat) return '';
+      return personExcelValue(p) || (p ? personCell(p) : '');
+    });
+    rows.push([day.timeLabel, day.eligibleType, ...posCells]);
+  }
 
-  return `<!DOCTYPE html>
-<html xmlns:o="urn:schemas-microsoft-com:office:office"
-      xmlns:x="urn:schemas-microsoft-com:office:excel"
-      xmlns="http://www.w3.org/TR/REC-html40">
-<head>
-<meta charset="utf-8">
-<!--[if gte mso 9]><xml>
-<x:ExcelWorkbook>
-  <x:ExcelWorksheets>
-    <x:ExcelWorksheet>
-      <x:Name>ADNCO Roster</x:Name>
-      <x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions>
-    </x:ExcelWorksheet>
-  </x:ExcelWorksheets>
-</x:ExcelWorkbook>
-</xml><![endif]-->
-<style>
-  table { border-collapse: collapse; }
-  td, th { mso-number-format:"\\@"; }
-</style>
-</head>
-<body>
-<table style="border-collapse:collapse;font-family:Arial,sans-serif">
-  <tr><td colspan="7" style="font-size:18pt;font-weight:bold;padding:4px 0 2px">${escapeHtml(monthLabel)} ADNCO Roster</td></tr>
-  <tr><td colspan="7" style="font-size:11pt;color:#4b5563;padding-bottom:4px">${unit} · Generated ${escapeHtml(generated)}${roster.finalized ? ' · FINALIZED' : ''}</td></tr>
-  <tr><td colspan="7" style="font-size:10pt;color:#374151;padding:8px 10px;background:#f3f4f6;border:1px solid #d1d5db">
-    <strong>Positions (in order):</strong> Bldg 827 (DNCO, LCpl) · Bldg 827 #2 · Bldg 829 #1 · Bldg 829 #2 · Duty Driver (licensed)<br>
-    <strong>Academic rows</strong> are auto-filled. <strong style="color:#b45309">MAT rows (yellow cells)</strong> — MAT platoon fills in manually.
-  </td></tr>
-  <tr><td colspan="7" style="height:8px"></td></tr>
-  <thead>
-    <tr>
-      <th style="background:#1a2332;color:#ffffff;font-weight:bold;border:1px solid #9ca3af;padding:8px 10px;font-family:Arial,sans-serif;font-size:11pt">Date &amp; Time</th>
-      <th style="background:#1a2332;color:#ffffff;font-weight:bold;border:1px solid #9ca3af;padding:8px 10px;font-family:Arial,sans-serif;font-size:11pt">Type</th>
-      ${posHeaders}
-    </tr>
-  </thead>
-  <tbody>${rows}</tbody>
-</table>
-</body>
-</html>`;
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols'] = [
+    { wch: 34 },
+    { wch: 11 },
+    ...ADNCO_POSITIONS.map(() => ({ wch: 24 })),
+  ];
+  ws['!merges'] = [0, 1, 2, 3].map((r) => ({
+    s: { r, c: 0 },
+    e: { r, c: colCount - 1 },
+  }));
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'ADNCO Roster');
+  return wb;
 }
 
 export function exportAdncoCSV(roster, students, settings) {
@@ -119,19 +80,11 @@ export function exportAdncoCSV(roster, students, settings) {
   return lines.join('\n');
 }
 
-/** Download a formatted Excel workbook (.xls) for MAT platoon to complete manually. */
+/** Download a formatted Excel workbook (.xlsx) for MAT platoon to complete manually. */
 export function downloadAdncoExcel(roster, students, settings) {
-  const content = buildAdncoExcelHtml(roster, students, settings);
-  const filename = `YouGotFireWatch-ADNCO-${roster.year}-${String(roster.month).padStart(2, '0')}.xls`;
-  const blob = new Blob(['\ufeff', content], { type: 'application/vnd.ms-excel;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  const wb = buildAdncoWorkbook(roster, students, settings);
+  const filename = `YouGotFireWatch-ADNCO-${roster.year}-${String(roster.month).padStart(2, '0')}.xlsx`;
+  XLSX.writeFile(wb, filename);
   return true;
 }
 
