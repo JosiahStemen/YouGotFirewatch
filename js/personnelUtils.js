@@ -4,7 +4,6 @@ export function normalizeStudent(student) {
   const s = { ...student };
   s.phoneNumber = s.phoneNumber ?? '';
   s.adncoNonAvailabilityInput = s.adncoNonAvailabilityInput ?? '';
-  if (s.adncoPoints == null) s.adncoPoints = 0;
   return s;
 }
 

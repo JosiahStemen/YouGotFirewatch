@@ -1,16 +1,29 @@
 /**
  * ADNCO Student Roster Generator
  *
+ * Each duty night (1630 start) needs 5 positions:
+ *   2× Building 829, 2× Building 827, 1× Duty Driver
+ *
  * Duty windows (shift starts at 1630 on startDate):
  *   MAT       — Sun 1630 through Fri 1630 (starts Sun–Thu)
  *   Academic  — Fri 1630 through Sun 1630 (starts Fri–Sat)
+ *
+ * Assignment: randomized fair rotation — students with fewer duties this month
+ * are preferred; no one is assigned twice the same night.
  */
 
 import {
-  getMonthDays, toISODate, parseDate, isDateInRange, generateId, formatShortDate, getDayType,
+  getMonthDays, toISODate, parseDate, isDateInRange, generateId, formatShortDate,
 } from './dateUtils.js';
-import { getUSFederalHolidays, isHoliday } from './holidays.js';
 import { parseDayNumberInput, resolveDayNumberRangesForMonth } from './dayNumberAvailability.js';
+
+export const ADNCO_POSITIONS = [
+  { position: '829-1', label: 'Bldg 829 #1' },
+  { position: '829-2', label: 'Bldg 829 #2' },
+  { position: '827-1', label: 'Bldg 827 #1' },
+  { position: '827-2', label: 'Bldg 827 #2' },
+  { position: 'driver', label: 'Duty Driver' },
+];
 
 export function getSlotEligibleType(startDateIso) {
   const dow = parseDate(startDateIso).getDay();
@@ -26,65 +39,76 @@ export function formatSlotWindow(startDate, endDate) {
   return `${startLabel} 1630 → ${endLabel} 1630`;
 }
 
-export function createAdncoSlots(year, month, settings, existingSlots) {
-  const days = getMonthDays(year, month);
-  const holidays = getUSFederalHolidays(year);
-  const map = new Map((existingSlots || []).map((s) => [s.startDate, s]));
-  return days.map((day) => {
-    const startDate = toISODate(day);
-    const existing = map.get(startDate);
-    if (existing) return { ...existing };
+function slotKey(startDate, position) {
+  return `${startDate}|${position}`;
+}
 
+function migrateLegacySlots(existingSlots, year, month) {
+  if (!existingSlots?.length || existingSlots[0].position) return existingSlots;
+
+  const legacyByDate = new Map(existingSlots.map((s) => [s.startDate, s]));
+  return createAdncoSlots(year, month, null).map((slot) => {
+    const leg = legacyByDate.get(slot.startDate);
+    if (leg?.personId && slot.position === '829-1') {
+      return { ...slot, personId: leg.personId };
+    }
+    return slot;
+  });
+}
+
+export function createAdncoSlots(year, month, existingSlots) {
+  const normalized = migrateLegacySlots(existingSlots, year, month);
+  const days = getMonthDays(year, month);
+  const existingByKey = new Map(
+    (normalized || []).map((s) => [slotKey(s.startDate, s.position), s])
+  );
+  const slots = [];
+
+  for (const day of days) {
+    const startDate = toISODate(day);
     const end = new Date(day);
     end.setDate(end.getDate() + 1);
     const endDate = toISODate(end);
     const eligibleType = getSlotEligibleType(startDate);
-    const dayIsHoliday = isHoliday(startDate, holidays);
-    const dayType = getDayType(startDate, dayIsHoliday);
-    const points = settings?.baselines?.[dayType] ?? 1;
+    const timeLabel = formatSlotWindow(startDate, endDate);
 
-    return {
-      id: generateId(),
-      startDate,
-      endDate,
-      timeLabel: formatSlotWindow(startDate, endDate),
-      eligibleType,
-      personId: null,
-      points,
-      note: dayIsHoliday ? 'Federal holiday' : undefined,
-    };
-  });
-}
-
-export function resetAdncoSlotsToBaseline(slots, settings, year) {
-  const holidays = getUSFederalHolidays(year);
-  return slots.map((slot) => {
-    const dayIsHoliday = isHoliday(slot.startDate, holidays);
-    const dayType = getDayType(slot.startDate, dayIsHoliday);
-    return { ...slot, points: settings.baselines[dayType], note: undefined };
-  });
-}
-
-export function applyAdncoWeekendDefaults(slots, settings, year) {
-  const holidays = getUSFederalHolidays(year);
-  return slots.map((slot) => {
-    const dayIsHoliday = isHoliday(slot.startDate, holidays);
-    const dayType = getDayType(slot.startDate, dayIsHoliday);
-    return { ...slot, points: settings.baselines[dayType], note: dayIsHoliday ? 'Federal holiday' : slot.note };
-  });
-}
-
-export function applyAdncoBulkUpdate(slots, startDate, endDate, updates) {
-  return slots.map((slot) => {
-    if (slot.startDate >= startDate && slot.startDate <= endDate) {
-      return {
-        ...slot,
-        points: updates.points ?? slot.points,
-        note: updates.note ? (updates.appendNote && slot.note ? `${slot.note}; ${updates.note}` : updates.note) : slot.note,
-      };
+    for (const pos of ADNCO_POSITIONS) {
+      const key = slotKey(startDate, pos.position);
+      const existing = existingByKey.get(key);
+      if (existing) {
+        slots.push({ ...existing, position: pos.position, positionLabel: pos.label });
+        continue;
+      }
+      slots.push({
+        id: generateId(),
+        startDate,
+        endDate,
+        timeLabel,
+        eligibleType,
+        position: pos.position,
+        positionLabel: pos.label,
+        personId: null,
+      });
     }
-    return slot;
-  });
+  }
+
+  return slots;
+}
+
+export function groupAdncoSlotsByDay(slots) {
+  const map = new Map();
+  for (const slot of slots ?? []) {
+    if (!map.has(slot.startDate)) {
+      map.set(slot.startDate, {
+        startDate: slot.startDate,
+        timeLabel: slot.timeLabel,
+        eligibleType: slot.eligibleType,
+        positions: {},
+      });
+    }
+    map.get(slot.startDate).positions[slot.position] = slot;
+  }
+  return [...map.values()].sort((a, b) => a.startDate.localeCompare(b.startDate));
 }
 
 export function resolveAdncoNonAvailability(person, year, month) {
@@ -99,7 +123,6 @@ export function resolveAdncoPersonnel(personnel, year, month) {
   return personnel.map((p) => ({
     ...p,
     adncoResolvedNA: resolveAdncoNonAvailability(p, year, month),
-    adncoPoints: p.adncoPoints ?? p.points ?? 0,
   }));
 }
 
@@ -109,17 +132,30 @@ function slotBlockedByNA(person, slot) {
   );
 }
 
-function compareCandidates(a, b) {
-  const aPts = a.adncoPoints ?? 0;
-  const bPts = b.adncoPoints ?? 0;
-  if (aPts !== bPts) return aPts - bPts;
-  const aLast = a.lastAdncoDutyDate || '';
-  const bLast = b.lastAdncoDutyDate || '';
-  if (aLast !== bLast) return aLast.localeCompare(bLast);
-  return a.id.localeCompare(b.id);
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
 }
 
-export function generateAdncoRoster(year, month, students, settings, existingRoster, keepManual, editedSlots) {
+function pickFairRandom(resolved, slot, assignedToday, assignmentCount) {
+  const pool = resolved.filter(
+    (p) =>
+      p.studentType === slot.eligibleType &&
+      !assignedToday.has(p.id) &&
+      !slotBlockedByNA(p, slot)
+  );
+  if (!pool.length) return null;
+
+  const minCount = Math.min(...pool.map((p) => assignmentCount.get(p.id) || 0));
+  const fairest = pool.filter((p) => (assignmentCount.get(p.id) || 0) === minCount);
+  return shuffle(fairest)[0];
+}
+
+export function generateAdncoRoster(year, month, students, existingRoster, keepManual, editedSlots) {
   students = (students ?? []).filter((p) => p.studentType === 'Academic' || p.studentType === 'MAT');
   const warnings = [];
 
@@ -131,67 +167,71 @@ export function generateAdncoRoster(year, month, students, settings, existingRos
   }
 
   const resolved = resolveAdncoPersonnel(students, year, month);
-  let slots = editedSlots
+  let slots = editedSlots?.length
     ? editedSlots.map((s) => ({ ...s }))
-    : createAdncoSlots(year, month, settings, existingRoster?.slots);
+    : createAdncoSlots(year, month, existingRoster?.slots);
 
   if (keepManual && existingRoster) {
+    const manualByKey = new Map(
+      existingRoster.slots
+        .filter((s) => s.personId)
+        .map((s) => [slotKey(s.startDate, s.position), s.personId])
+    );
     slots = slots.map((s) => {
-      const ex = existingRoster.slots.find((e) => e.startDate === s.startDate);
-      return ex?.personId ? { ...s, personId: ex.personId } : { ...s, personId: null };
+      const key = slotKey(s.startDate, s.position);
+      if (manualByKey.has(key)) return { ...s, personId: manualByKey.get(key) };
+      return { ...s, personId: null };
     });
-  } else {
+  } else if (!keepManual) {
     slots = slots.map((s) => ({ ...s, personId: null }));
   }
 
-  const assignedThisMonth = new Set(slots.filter((s) => s.personId).map((s) => s.personId));
-  const tempState = resolved.map((p) => ({ ...p }));
-
-  const matSlots = slots.filter((s) => s.eligibleType === 'MAT' && !s.personId);
-  const acSlots = slots.filter((s) => s.eligibleType === 'Academic' && !s.personId);
-
-  if (matSlots.length && !resolved.some((p) => p.studentType === 'MAT')) {
-    warnings.push(`${matSlots.length} MAT duty slot(s) but no MAT students on roster.`);
-  }
-  if (acSlots.length && !resolved.some((p) => p.studentType === 'Academic')) {
-    warnings.push(`${acSlots.length} Academic duty slot(s) but no Academic students on roster.`);
+  const assignmentCount = new Map();
+  for (const s of slots) {
+    if (s.personId) {
+      assignmentCount.set(s.personId, (assignmentCount.get(s.personId) || 0) + 1);
+    }
   }
 
-  const sorted = [...slots]
-    .filter((s) => !s.personId)
-    .sort((a, b) => {
-      const ptsDiff = (b.points ?? 0) - (a.points ?? 0);
-      if (ptsDiff !== 0) return ptsDiff;
-      return a.startDate.localeCompare(b.startDate);
-    });
+  const matDays = new Set(slots.filter((s) => s.eligibleType === 'MAT').map((s) => s.startDate)).size;
+  const acDays = new Set(slots.filter((s) => s.eligibleType === 'Academic').map((s) => s.startDate)).size;
+
+  if (matDays && !resolved.some((p) => p.studentType === 'MAT')) {
+    warnings.push(`${matDays} MAT duty night(s) but no MAT students on roster.`);
+  }
+  if (acDays && !resolved.some((p) => p.studentType === 'Academic')) {
+    warnings.push(`${acDays} Academic duty night(s) but no Academic students on roster.`);
+  }
+
+  const days = shuffle([...new Set(slots.map((s) => s.startDate))]);
   const result = slots.map((s) => ({ ...s }));
 
-  for (const slot of sorted) {
-    const idx = result.findIndex((s) => s.startDate === slot.startDate);
-    if (idx < 0 || result[idx].personId) continue;
-
-    const eligible = tempState.filter((p) =>
-      p.studentType === slot.eligibleType &&
-      !assignedThisMonth.has(p.id) &&
-      !slotBlockedByNA(p, slot)
+  for (const startDate of days) {
+    const assignedToday = new Set(
+      result.filter((s) => s.startDate === startDate && s.personId).map((s) => s.personId)
     );
 
-    if (!eligible.length) {
-      warnings.push(
-        `No eligible ${slot.eligibleType} student for ${formatSlotWindow(slot.startDate, slot.endDate)}. Manual assignment required.`
-      );
-      continue;
-    }
+    const daySlots = ADNCO_POSITIONS.map((pos) =>
+      result.find((s) => s.startDate === startDate && s.position === pos.position)
+    ).filter(Boolean);
 
-    eligible.sort(compareCandidates);
-    const chosen = eligible[0];
-    result[idx] = { ...result[idx], personId: chosen.id };
-    assignedThisMonth.add(chosen.id);
+    for (const slot of daySlots) {
+      if (slot.personId) continue;
 
-    const tIdx = tempState.findIndex((p) => p.id === chosen.id);
-    if (tIdx >= 0) {
-      tempState[tIdx].adncoPoints += slot.points;
-      tempState[tIdx].lastAdncoDutyDate = slot.startDate;
+      const chosen = pickFairRandom(resolved, slot, assignedToday, assignmentCount);
+      if (!chosen) {
+        warnings.push(
+          `No eligible ${slot.eligibleType} student for ${slot.positionLabel} on ${formatSlotWindow(slot.startDate, slot.endDate)}.`
+        );
+        continue;
+      }
+
+      const idx = result.findIndex((s) => s.id === slot.id);
+      if (idx >= 0) {
+        result[idx] = { ...result[idx], personId: chosen.id };
+        assignedToday.add(chosen.id);
+        assignmentCount.set(chosen.id, (assignmentCount.get(chosen.id) || 0) + 1);
+      }
     }
   }
 
@@ -207,7 +247,7 @@ export function generateAdncoRoster(year, month, students, settings, existingRos
 
   const unassigned = result.filter((s) => !s.personId).length;
   if (unassigned) {
-    warnings.push(`${unassigned} ADNCO slot(s) still unassigned.`);
+    warnings.push(`${unassigned} position(s) still unassigned — add students or reduce non-availability.`);
   }
 
   return { roster, warnings };
@@ -222,18 +262,26 @@ export function validateAdncoAssignment(personId, slotId, roster, students, year
   if (person.studentType !== slot.eligibleType) {
     return {
       valid: false,
-      message: `${person.rank} ${person.lastName || person.name} is ${person.studentType}. This slot requires ${slot.eligibleType} (window: ${slot.eligibleType === 'MAT' ? 'Sun 1630 – Fri 1630' : 'Fri 1630 – Sun 1630'}).`,
+      message: `${person.rank} ${person.lastName || person.name} is ${person.studentType}. This night requires ${slot.eligibleType} students.`,
     };
   }
 
-  const other = roster.slots.find((s) => s.personId === personId && s.id !== slotId);
-  if (other) {
-    return { valid: false, message: 'This student already has an ADNCO duty this month.' };
+  const sameNight = roster.slots.find(
+    (s) => s.startDate === slot.startDate && s.personId === personId && s.id !== slotId
+  );
+  if (sameNight) {
+    return {
+      valid: false,
+      message: `${person.rank} ${person.lastName || person.name} is already assigned ${sameNight.positionLabel} that same night.`,
+    };
   }
 
   const resolved = resolveAdncoPersonnel([person], year, month)[0];
   if (slotBlockedByNA(resolved, slot)) {
-    return { valid: false, message: `${person.rank} ${person.lastName || person.name} is not available for this shift (check non-availability days).` };
+    return {
+      valid: false,
+      message: `${person.rank} ${person.lastName || person.name} is not available for this shift (check non-availability days).`,
+    };
   }
 
   return { valid: true, message: '' };
@@ -245,17 +293,29 @@ export function finalizeAdncoRoster(roster, students) {
     if (!slot.personId) continue;
     const idx = updated.findIndex((p) => p.id === slot.personId);
     if (idx >= 0) {
-      updated[idx].adncoPoints = (updated[idx].adncoPoints ?? updated[idx].points ?? 0) + slot.points;
-      updated[idx].lastAdncoDutyDate = slot.startDate;
+      const prev = updated[idx].lastAdncoDutyDate;
+      if (!prev || slot.startDate > prev) {
+        updated[idx].lastAdncoDutyDate = slot.startDate;
+      }
+      updated[idx].adncoDutyCount = (updated[idx].adncoDutyCount ?? 0) + 1;
     }
   }
   return updated;
 }
 
 export function countAdncoStaffing(slots, students) {
-  const matSlots = slots.filter((s) => s.eligibleType === 'MAT').length;
-  const acSlots = slots.filter((s) => s.eligibleType === 'Academic').length;
+  const matNights = new Set((slots ?? []).filter((s) => s.eligibleType === 'MAT').map((s) => s.startDate)).size;
+  const acNights = new Set((slots ?? []).filter((s) => s.eligibleType === 'Academic').map((s) => s.startDate)).size;
+  const positionsPerNight = ADNCO_POSITIONS.length;
   const matStudents = (students ?? []).filter((p) => p.studentType === 'MAT').length;
   const acStudents = (students ?? []).filter((p) => p.studentType === 'Academic').length;
-  return { matSlots, acSlots, matStudents, acStudents };
+  return {
+    matNights,
+    acNights,
+    matPositions: matNights * positionsPerNight,
+    acPositions: acNights * positionsPerNight,
+    matStudents,
+    acStudents,
+    positionsPerNight,
+  };
 }

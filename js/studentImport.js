@@ -39,10 +39,10 @@ export function getStudentImportTemplate() {
     '# Completely separate from main duty personnel backup',
     '# studentType must be Academic or MAT',
     '# nonAvailability: admin edits in CSV each month — day numbers only, e.g. 5, 12-14, 20',
-    'rank,lastName,firstName,phoneNumber,studentType,points,lastDutyDate,nonAvailability',
-    'LCpl,Garcia,Luis,831-555-0101,MAT,4,,',
-    'Cpl,Anderson,Sarah,831-555-0102,Academic,6,,"10-12, 18"',
-    'PFC,Miller,James,831-555-0103,MAT,3,,5,20-22',
+    'rank,lastName,firstName,phoneNumber,studentType,lastDutyDate,nonAvailability',
+    'LCpl,Garcia,Luis,831-555-0101,MAT,,',
+    'Cpl,Anderson,Sarah,831-555-0102,Academic,,"10-12, 18"',
+    'PFC,Miller,James,831-555-0103,MAT,,5,20-22',
   ].join('\n');
 }
 
@@ -50,7 +50,7 @@ export function exportAdncoStudentsCSV(students) {
   const today = new Date().toISOString().split('T')[0];
   const lines = [
     '# YouGotFireWatch ADNCO Students',
-    'rank,lastName,firstName,phoneNumber,studentType,points,lastDutyDate,nonAvailability',
+    'rank,lastName,firstName,phoneNumber,studentType,lastDutyDate,nonAvailability',
   ];
   for (const s of students) {
     lines.push([
@@ -59,7 +59,6 @@ export function exportAdncoStudentsCSV(students) {
       csvField(s.firstName),
       csvField(s.phoneNumber || ''),
       csvField(s.studentType),
-      s.adncoPoints ?? 0,
       csvField(s.lastAdncoDutyDate || ''),
       csvField(formatDayNumberForDisplay(s.adncoNonAvailabilityInput || '')),
     ].join(','));
@@ -115,7 +114,6 @@ export function parseStudentImportCSV(text) {
       firstName: row.firstname.trim(),
       phoneNumber: row.phonenumber?.trim() || '',
       studentType,
-      adncoPoints: parseFloat(row.points) || 0,
       lastAdncoDutyDate: row.lastdutydate?.trim() || null,
       adncoNonAvailabilityInput: na.normalized || '',
     }));

@@ -234,6 +234,8 @@ table.data tr:hover { background: rgba(26,35,50,0.3); }
 .badge-mat { display: inline-block; background: rgba(59,130,246,0.2); color: #93c5fd; border: 1px solid rgba(59,130,246,0.4); padding: 0.15rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem; font-weight: 600; }
 .badge-academic { display: inline-block; background: rgba(251,191,36,0.15); color: var(--amber); border: 1px solid rgba(251,191,36,0.35); padding: 0.15rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem; font-weight: 600; }
 .adnco-table .adnco-phone { font-weight: 600; font-size: 0.95rem; color: var(--green); }
+.adnco-wide-table { font-size: 0.8rem; }
+.adnco-wide-table th, .adnco-wide-table td { vertical-align: top; }
 .student-type-badge { font-size: 0.7rem; padding: 0.1rem 0.4rem; border-radius: 0.25rem; margin-left: 0.35rem; }
 
 @media (max-width: 768px) {
