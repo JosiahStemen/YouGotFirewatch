@@ -7,6 +7,7 @@ import { getHolidayName } from './holidays.js';
 import {
   generateAdncoRoster, validateAdncoAssignment, finalizeAdncoRoster,
   createAdncoSlots, countAdncoStaffing, groupAdncoSlotsByDay, ADNCO_POSITIONS,
+  getEligibleStudentsForSlot,
 } from './adncoRoster.js';
 import { exportAdncoCSV, openAdncoPrintout } from './adncoExport.js';
 import {
@@ -45,8 +46,25 @@ function adncoSlotsRef(ctx) {
 }
 
 function getAdncoDayNote(day) {
-  const slot = day.positions['829-1'] ?? Object.values(day.positions)[0];
+  const slot = day.positions['827-1'] ?? Object.values(day.positions)[0];
   return slot?.note;
+}
+
+function renderAdncoBackupCard(ctx) {
+  const { state } = ctx;
+  const count = (state.adncoStudents ?? []).length;
+  return `<div class="card" style="border-color:rgba(201,162,39,0.4);background:rgba(201,162,39,0.05)">
+    <h3 class="font-semibold text-gold mb-2">📁 Student List Backup (CSV)</h3>
+    <p class="text-sm text-muted mb-3">Same workflow as OOD personnel backup: keep a CSV on your shared drive. Import before generating each month; a fresh export opens automatically after finalize.</p>
+    <div class="flex flex-wrap gap-2 mb-3">
+      <button class="btn btn-primary btn-sm" data-action="adnco-import-students">⬆ Import Backup (Replace All)</button>
+      <button class="btn btn-secondary btn-sm" data-action="adnco-export-students">⬇ Export Student List</button>
+      <button class="btn btn-secondary btn-sm" data-action="adnco-student-template">Download Template</button>
+    </div>
+    <p class="text-xs text-dim mb-2">${count} student${count !== 1 ? 's' : ''} loaded. Edit the backup CSV between months, then import before generating.</p>
+    <p class="text-xs text-dim"><strong>nonAvailability:</strong> day numbers for the roster month · <strong>driversLicense:</strong> Y = eligible for Duty Driver · Bldg 827 (DNCO) always requires an <strong>LCpl</strong>.</p>
+    <p class="text-xs text-gold mt-2">After finalize, a printable ADNCO roster and updated student CSV open in new tabs.</p>
+  </div>`;
 }
 
 function renderPositionCell(slot, students, map, readOnly, esc) {
@@ -56,7 +74,7 @@ function renderPositionCell(slot, students, map, readOnly, esc) {
       ? `<div><strong>${esc(p.rank)} ${esc(p.lastName)}, ${esc(p.firstName)}</strong>${p.phoneNumber ? `<div class="adnco-phone text-xs">${esc(p.phoneNumber)}</div>` : ''}</div>`
       : '<span class="text-amber">—</span>';
   }
-  const eligible = students.filter((s) => s.studentType === slot.eligibleType);
+  const eligible = getEligibleStudentsForSlot(slot, students);
   return `<select class="input" style="font-size:0.7rem;width:100%;min-width:7rem" data-action="adnco-reassign" data-slot-id="${slot.id}">
     <option value="">Unassigned</option>
     ${eligible.map((s) => `<option value="${s.id}" ${slot.personId === s.id ? 'selected' : ''}>${esc(adncoDisplayName(s))}</option>`).join('')}
@@ -107,13 +125,16 @@ export function renderAdncoTab(ctx) {
       </div>
     </div>
 
+    ${renderAdncoBackupCard(ctx)}
+
     <div class="card adnco-rules mb-4">
-      <h3 class="font-semibold text-gold mb-2">Positions Each Night</h3>
+      <h3 class="font-semibold text-gold mb-2">Positions Each Night (in order)</h3>
       <div class="grid-3 gap-2 text-sm mb-2">
+        <div>🏢 <strong>Bldg 827 (DNCO)</strong> — LCpl only</div>
+        <div>🏢 <strong>Bldg 827 #2</strong></div>
         <div>🏢 <strong>2×</strong> Building 829</div>
-        <div>🏢 <strong>2×</strong> Building 827</div>
-        <div>🚗 <strong>1×</strong> Duty Driver</div>
       </div>
+      <div class="text-sm mb-2">🚗 <strong>Duty Driver</strong> — driversLicense <strong>Y</strong> only</div>
       <div class="grid-2 gap-3 text-sm">
         <div><span class="badge-mat">MAT</span> Sun <strong>1630</strong> → Fri <strong>1630</strong></div>
         <div><span class="badge-academic">Academic</span> Fri <strong>1630</strong> → Sun <strong>1630</strong></div>
@@ -123,12 +144,6 @@ export function renderAdncoTab(ctx) {
     </div>
 
     ${renderAdminWorkflow(ctx)}
-
-    <div class="flex flex-wrap gap-2 mb-4">
-      <button class="btn btn-secondary btn-sm" data-action="adnco-import-students">⬆ Import Students</button>
-      <button class="btn btn-secondary btn-sm" data-action="adnco-export-students">⬇ Export Student List</button>
-      <button class="btn btn-secondary btn-sm" data-action="adnco-student-template">📄 Template</button>
-    </div>
   `;
 
   if (!ui.adncoGenerated || !roster) {
@@ -203,13 +218,15 @@ function renderAdncoMonthCalendar(ctx, slots, interactive) {
 function renderAdminWorkflow(ctx) {
   const { ui } = ctx;
   return `<div class="card adnco-admin-workflow mb-4">
-    <h3 class="font-semibold mb-2">📋 Monthly Availability (admin)</h3>
-    <p class="text-sm text-muted mb-3">Non-availability is set in the student CSV only — not in the app. Export the list each month, edit the <strong>nonAvailability</strong> column for ${formatMonthYear(ui.adncoMonth, ui.adncoYear)}, then re-import before generating.</p>
+    <h3 class="font-semibold mb-2">📋 Monthly Workflow (same as OOD)</h3>
+    <p class="text-sm text-muted mb-3">All student data lives in the CSV backup — not edited in-app. Each month for ${formatMonthYear(ui.adncoMonth, ui.adncoYear)}:</p>
     <ol class="text-sm text-muted" style="margin:0 0 0.75rem 1.25rem;line-height:1.6">
-      <li><strong>Export Student List</strong> (or use last month&apos;s export after finalize)</li>
-      <li>Edit <strong>nonAvailability</strong> — day numbers only, e.g. <code>5, 12-14, 20</code></li>
-      <li><strong>Import Students</strong> to load the updated file</li>
-      <li><strong>Generate ADNCOs</strong></li>
+      <li><strong>Export Student List</strong> (or use last month&apos;s file after finalize)</li>
+      <li>Edit CSV: update <strong>nonAvailability</strong>, add/remove students, set <strong>driversLicense</strong> (Y/N)</li>
+      <li><strong>Import Backup</strong> to load the updated file into the calendar</li>
+      <li>Review calendar — click days to pre-assign or add notes</li>
+      <li><strong>Generate ADNCOs</strong> → verify roster → <strong>Finalize</strong></li>
+      <li>Save the new student CSV export for next month</li>
     </ol>
     <p class="hint mb-0">${DAY_NUMBER_HINT}</p>
   </div>`;
@@ -335,7 +352,7 @@ export function handleAdncoClick(action, el, ctx) {
       const rows = ADNCO_POSITIONS.map((pos) => {
         const slot = day.positions[pos.position];
         const p = slot?.personId ? map.get(slot.personId) : null;
-        const eligible = students.filter((s) => s.studentType === day.eligibleType);
+        const eligible = slot ? getEligibleStudentsForSlot(slot, students) : [];
         return `<tr>
           <td><strong>${pos.label}</strong></td>
           <td>${p ? `${esc(p.rank)} ${esc(p.lastName)}, ${esc(p.firstName)}` : '<span class="text-amber">Unassigned</span>'}</td>
@@ -370,8 +387,9 @@ export function handleAdncoClick(action, el, ctx) {
     }
     case 'adnco-show-finalize':
       openModal('Finalize ADNCO Roster',
-        `<p class="text-sm text-muted mb-3">Saves only to ADNCO history — does not affect main Personnel or OOD rosters.</p>
-         <p class="text-sm text-amber">Verify all 5 positions per night and phone numbers before confirming.</p>`,
+        `<p class="text-sm text-muted mb-3">Saves to ADNCO history only — does not affect OOD personnel. Updates student last-duty dates in memory.</p>
+         <p class="text-sm text-muted mb-3">A <strong>printable ADNCO roster</strong> and <strong>updated student CSV</strong> open in new tabs (allow pop-ups). Save that CSV for next month&apos;s import.</p>
+         <p class="text-sm text-amber">Verify DNCO (LCpl), all 5 positions per night, and phone numbers before confirming.</p>`,
         `<button class="btn btn-secondary" data-action="close-modal">Cancel</button>
          <button class="btn btn-primary" data-action="adnco-confirm-finalize">🔒 Confirm Finalize</button>`, 'sm');
       return true;
@@ -387,7 +405,17 @@ export function handleAdncoClick(action, el, ctx) {
       closeModal();
       persist();
       const printed = openAdncoPrintout(finalized, state.adncoStudents, state.settings);
-      toast(printed ? 'ADNCO roster finalized — printout opened' : 'Finalized! Use Print button if pop-up blocked.');
+      const studentExport = exportAdncoStudentsCSV(state.adncoStudents ?? []);
+      const csvOpened = openCSVInNewTab(studentExport.content, studentExport.filename);
+      if (printed && csvOpened) {
+        toast('Finalized! ADNCO printout + student CSV opened in new tabs.');
+      } else if (printed) {
+        toast('Roster opened. Allow pop-ups for student CSV too.');
+      } else if (csvOpened) {
+        toast('Student CSV opened. Allow pop-ups for printable roster.');
+      } else {
+        toast('Finalized! Allow pop-ups, then use Export buttons.');
+      }
       render();
       return true;
     }

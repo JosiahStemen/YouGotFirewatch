@@ -12,7 +12,7 @@ export function exportAdncoCSV(roster, students, settings) {
   const lines = [
     `# YouGotFireWatch ADNCO Roster — ${formatMonthYear(roster.month, roster.year)}`,
     `# ${settings?.unitName || ''}`,
-    `# Positions per night: 2× Bldg 829, 2× Bldg 827, 1× Duty Driver`,
+    `# Positions per night: Bldg 827 (DNCO), Bldg 827 #2, 2× Bldg 829, Duty Driver`,
     headers.join(','),
   ];
 
@@ -73,7 +73,7 @@ export function openAdncoPrintout(roster, students, settings) {
 <h1>ADNCO Roster — ${formatMonthYear(roster.month, roster.year)}${finalized}</h1>
 <p class="sub">${settings?.unitName || 'YouGotFireWatch'} · Generated ${new Date().toLocaleString()}</p>
 <div class="rules">
-  <strong>Each night:</strong> 2× Bldg 829 · 2× Bldg 827 · 1× Duty Driver<br>
+  <strong>Each night (in order):</strong> Bldg 827 (DNCO, LCpl) · Bldg 827 #2 · 2× Bldg 829 · Duty Driver (licensed)<br>
   <strong>Duty windows:</strong> MAT = Sun 1630 – Fri 1630 · Academic = Fri 1630 – Sun 1630
 </div>
 <table>

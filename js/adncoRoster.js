@@ -2,7 +2,7 @@
  * ADNCO Student Roster Generator
  *
  * Each duty night (1630 start) needs 5 positions:
- *   2× Building 829, 2× Building 827, 1× Duty Driver
+ *   Bldg 827 (DNCO — LCpl), Bldg 827 #2, 2× Building 829, 1× Duty Driver (licensed)
  *
  * Duty windows (shift starts at 1630 on startDate):
  *   MAT       — Sun 1630 through Fri 1630 (starts Sun–Thu)
@@ -18,12 +18,32 @@ import {
 import { parseDayNumberInput, resolveDayNumberRangesForMonth } from './dayNumberAvailability.js';
 
 export const ADNCO_POSITIONS = [
+  { position: '827-1', label: 'Bldg 827 (DNCO)', requiresLcpl: true },
+  { position: '827-2', label: 'Bldg 827 #2' },
   { position: '829-1', label: 'Bldg 829 #1' },
   { position: '829-2', label: 'Bldg 829 #2' },
-  { position: '827-1', label: 'Bldg 827 #1' },
-  { position: '827-2', label: 'Bldg 827 #2' },
-  { position: 'driver', label: 'Duty Driver' },
+  { position: 'driver', label: 'Duty Driver', requiresDriversLicense: true },
 ];
+
+export function isLcplRank(rank) {
+  return String(rank ?? '').trim().toLowerCase() === 'lcpl';
+}
+
+export function hasDriversLicense(person) {
+  return person?.driversLicense === true;
+}
+
+export function personEligibleForAdncoSlot(person, slot) {
+  if (!person || !slot) return false;
+  if (person.studentType !== slot.eligibleType) return false;
+  if (slot.position === '827-1' && !isLcplRank(person.rank)) return false;
+  if (slot.position === 'driver' && !hasDriversLicense(person)) return false;
+  return true;
+}
+
+export function getEligibleStudentsForSlot(slot, students) {
+  return (students ?? []).filter((s) => personEligibleForAdncoSlot(s, slot));
+}
 
 export function getSlotEligibleType(startDateIso) {
   const dow = parseDate(startDateIso).getDay();
@@ -49,7 +69,7 @@ function migrateLegacySlots(existingSlots, year, month) {
   const legacyByDate = new Map(existingSlots.map((s) => [s.startDate, s]));
   return createAdncoSlots(year, month, null).map((slot) => {
     const leg = legacyByDate.get(slot.startDate);
-    if (leg?.personId && slot.position === '829-1') {
+    if (leg?.personId && slot.position === '827-1') {
       return { ...slot, personId: leg.personId };
     }
     return slot;
@@ -144,7 +164,7 @@ function shuffle(arr) {
 function pickFairRandom(resolved, slot, assignedToday, assignmentCount) {
   const pool = resolved.filter(
     (p) =>
-      p.studentType === slot.eligibleType &&
+      personEligibleForAdncoSlot(p, slot) &&
       !assignedToday.has(p.id) &&
       !slotBlockedByNA(p, slot)
   );
@@ -201,6 +221,12 @@ export function generateAdncoRoster(year, month, students, existingRoster, keepM
   }
   if (acDays && !resolved.some((p) => p.studentType === 'Academic')) {
     warnings.push(`${acDays} Academic duty night(s) but no Academic students on roster.`);
+  }
+  if (matDays && !resolved.some((p) => p.studentType === 'MAT' && isLcplRank(p.rank))) {
+    warnings.push(`MAT nights require LCpls for Bldg 827 (DNCO) — no MAT LCpls on roster.`);
+  }
+  if (acDays && !resolved.some((p) => p.studentType === 'Academic' && isLcplRank(p.rank))) {
+    warnings.push(`Academic nights require LCpls for Bldg 827 (DNCO) — no Academic LCpls on roster.`);
   }
 
   const days = shuffle([...new Set(slots.map((s) => s.startDate))]);
@@ -263,6 +289,20 @@ export function validateAdncoAssignment(personId, slotId, roster, students, year
     return {
       valid: false,
       message: `${person.rank} ${person.lastName || person.name} is ${person.studentType}. This night requires ${slot.eligibleType} students.`,
+    };
+  }
+
+  if (slot.position === '827-1' && !isLcplRank(person.rank)) {
+    return {
+      valid: false,
+      message: `Bldg 827 (DNCO) requires an LCpl. ${person.rank} ${person.lastName || person.name} is not eligible.`,
+    };
+  }
+
+  if (slot.position === 'driver' && !hasDriversLicense(person)) {
+    return {
+      valid: false,
+      message: `${person.rank} ${person.lastName || person.name} does not have a driver's license (driversLicense must be Y in the student CSV).`,
     };
   }
 

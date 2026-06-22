@@ -4,7 +4,7 @@
 
 import { generateId } from './dateUtils.js';
 import { parseDayNumberInput, formatDayNumberForDisplay } from './dayNumberAvailability.js';
-import { normalizeStudent, studentMatchKey } from './personnelUtils.js';
+import { normalizeStudent, parseDriversLicense, studentMatchKey } from './personnelUtils.js';
 
 function csvField(val) {
   if (val == null || val === '') return '';
@@ -39,10 +39,11 @@ export function getStudentImportTemplate() {
     '# Completely separate from main duty personnel backup',
     '# studentType must be Academic or MAT',
     '# nonAvailability: admin edits in CSV each month — day numbers only, e.g. 5, 12-14, 20',
-    'rank,lastName,firstName,phoneNumber,studentType,lastDutyDate,nonAvailability',
-    'LCpl,Garcia,Luis,831-555-0101,MAT,,',
-    'Cpl,Anderson,Sarah,831-555-0102,Academic,,"10-12, 18"',
-    'PFC,Miller,James,831-555-0103,MAT,,5,20-22',
+    '# driversLicense: Y or N — only Y can be assigned Duty Driver',
+    'rank,lastName,firstName,phoneNumber,studentType,driversLicense,lastDutyDate,nonAvailability',
+    'LCpl,Garcia,Luis,831-555-0101,MAT,Y,,',
+    'Cpl,Anderson,Sarah,831-555-0102,Academic,N,,"10-12, 18"',
+    'PFC,Miller,James,831-555-0103,MAT,Y,,5,20-22',
   ].join('\n');
 }
 
@@ -50,7 +51,7 @@ export function exportAdncoStudentsCSV(students) {
   const today = new Date().toISOString().split('T')[0];
   const lines = [
     '# YouGotFireWatch ADNCO Students',
-    'rank,lastName,firstName,phoneNumber,studentType,lastDutyDate,nonAvailability',
+    'rank,lastName,firstName,phoneNumber,studentType,driversLicense,lastDutyDate,nonAvailability',
   ];
   for (const s of students) {
     lines.push([
@@ -59,6 +60,7 @@ export function exportAdncoStudentsCSV(students) {
       csvField(s.firstName),
       csvField(s.phoneNumber || ''),
       csvField(s.studentType),
+      csvField(s.driversLicense ? 'Y' : 'N'),
       csvField(s.lastAdncoDutyDate || ''),
       csvField(formatDayNumberForDisplay(s.adncoNonAvailabilityInput || '')),
     ].join(','));
@@ -107,6 +109,7 @@ export function parseStudentImportCSV(text) {
     const naRaw = row.nonavailability || row.non_availability || '';
     const na = parseDayNumberInput(naRaw);
 
+    const dlRaw = row.driverslicense ?? row.drivers_license ?? '';
     students.push(normalizeStudent({
       id: generateId(),
       rank: row.rank.trim(),
@@ -114,6 +117,7 @@ export function parseStudentImportCSV(text) {
       firstName: row.firstname.trim(),
       phoneNumber: row.phonenumber?.trim() || '',
       studentType,
+      driversLicense: parseDriversLicense(dlRaw),
       lastAdncoDutyDate: row.lastdutydate?.trim() || null,
       adncoNonAvailabilityInput: na.normalized || '',
     }));

@@ -23,8 +23,9 @@ import {
 import {
   renderAdncoTab, handleAdncoClick, handleAdncoChange, createAdncoUiDefaults, initAdncoSlots,
 } from './adncoTab.js';
+import { normalizeStudentList } from './personnelUtils.js';
 
-export const APP_VERSION = '2026.06.22b';
+export const APP_VERSION = '2026.06.23';
 
 // ─── State ───────────────────────────────────────────────────────────────────
 let state = {
@@ -65,6 +66,7 @@ function init() {
   }
   if (!state.adncoHistory) state.adncoHistory = [];
   if (!state.adncoStudents) state.adncoStudents = [];
+  state.adncoStudents = normalizeStudentList(state.adncoStudents);
   if (state.activeTab === 'personnel') state.activeTab = 'generate';
   ui.settingsDraft = { ...state.settings, baselines: { ...state.settings.baselines } };
   ui.slots = createMonthSlots(ui.genYear, ui.genMonth, state.settings);
@@ -773,13 +775,13 @@ function showHelpModal() {
        <p class="text-sm text-muted mt-1">Click calendar days to set hardship points and notes (96s, holidays). Finalizing permanently updates points and last duty dates. Use the personnel CSV backup workflow each month.</p></div>
 
      <h3 class="text-gold font-semibold mb-2 mt-4">🎓 ADNCO Student Duty (Generate ADNCOs)</h3>
-     <p class="text-sm text-muted mb-3">Completely separate student list. Each duty night (1630 start) needs <strong>5 positions</strong>: 2× Bldg 829, 2× Bldg 827, 1× Duty Driver. No points — randomized fair rotation.</p>
+     <p class="text-sm text-muted mb-3">Separate student CSV backup — same monthly workflow as OOD. Each night (1630 start): <strong>Bldg 827 (DNCO)</strong> (LCpl only), Bldg 827 #2, 2× Bldg 829, Duty Driver (<strong>driversLicense Y</strong> only).</p>
+     <div class="card mb-3" style="padding:1rem"><strong>Monthly Workflow</strong>
+       <p class="text-sm text-muted mt-1">Export student CSV → edit <strong>nonAvailability</strong>, add/remove students, set <strong>driversLicense</strong> → import → calendar → generate → finalize (printout + new CSV open automatically).</p></div>
      <div class="card mb-3" style="padding:1rem"><strong>Duty Windows</strong>
-       <p class="text-sm text-muted mt-1"><span class="badge-mat">MAT</span> Sun 1630 → Fri 1630 (starts Sun–Thu) · <span class="badge-academic">Academic</span> Fri 1630 → Sun 1630 (starts Fri–Sat). One student cannot fill two positions the same night.</p></div>
-     <div class="card mb-3" style="padding:1rem"><strong>✏ ADNCO Calendar</strong>
-       <p class="text-sm text-muted mt-1">Click any day before or after generating to review positions, add night notes, or manually pre-assign. Re-generate reshuffles open slots (check <em>Keep manual assignments</em> to lock edits).</p></div>
-     <div class="card" style="padding:1rem"><strong>📁 ADNCO Availability (admin)</strong>
-       <p class="text-sm text-muted mt-1">Non-availability is edited in the student CSV <strong>nonAvailability</strong> column only — export, edit day numbers (e.g. <code>5, 12-14</code>), re-import, then generate.</p></div>`,
+       <p class="text-sm text-muted mt-1"><span class="badge-mat">MAT</span> Sun 1630 → Fri 1630 · <span class="badge-academic">Academic</span> Fri 1630 → Sun 1630. Fair random rotation — no points.</p></div>
+     <div class="card" style="padding:1rem"><strong>✏ ADNCO Calendar</strong>
+       <p class="text-sm text-muted mt-1">Click days to pre-assign or add notes. DNCO slot always requires an LCpl; driver slot requires license Y in the CSV.</p></div>`,
     `<button class="btn btn-primary" data-action="close-modal" style="width:100%">Got It</button>`, 'lg');
 }
 
