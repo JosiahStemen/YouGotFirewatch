@@ -2,7 +2,50 @@ import { formatMonthYear } from './dateUtils.js';
 import { groupAdncoSlotsByDay, ADNCO_POSITIONS } from './adncoRoster.js';
 
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-const EXPORT_BUILD = '20260706';
+const EXPORT_BUILD = '20260707';
+
+const COLORS = {
+  navy: '1A2332',
+  white: 'FFFFFF',
+  slate: '4B5563',
+  lightGray: 'F4F6F8',
+  border: 'CBD5E1',
+  headerText: 'FFFFFF',
+  academicBg: 'FFFBEB',
+  academicAlt: 'FEF9E7',
+  academicType: '92400E',
+  matBg: 'EFF6FF',
+  matAlt: 'DBEAFE',
+  matType: '1E40AF',
+  matHint: '64748B',
+  finalized: '6B7C3E',
+  subtitleBg: 'E8EDF2',
+  unassigned: '9CA3AF',
+};
+
+function thinBorder(color = COLORS.border) {
+  const side = { style: 'thin', color: { rgb: color } };
+  return { top: side, bottom: side, left: side, right: side };
+}
+
+function makeStyle({ font = {}, fill, alignment = {}, border = thinBorder() } = {}) {
+  const style = { font: { name: 'Calibri', sz: 11, color: { rgb: COLORS.navy }, ...font }, alignment: { vertical: 'center', wrapText: true, ...alignment }, border };
+  if (fill) style.fill = { patternType: 'solid', fgColor: { rgb: fill } };
+  return style;
+}
+
+const STYLES = {
+  title: makeStyle({ font: { bold: true, sz: 18, color: { rgb: COLORS.white } }, fill: COLORS.navy, alignment: { horizontal: 'center' } }),
+  subtitle: makeStyle({ font: { sz: 11, color: { rgb: COLORS.slate } }, fill: COLORS.subtitleBg, alignment: { horizontal: 'center' } }),
+  info: makeStyle({ font: { sz: 10, color: { rgb: COLORS.slate } }, fill: COLORS.lightGray, alignment: { horizontal: 'center', wrapText: true } }),
+  colHeader: makeStyle({ font: { bold: true, sz: 10, color: { rgb: COLORS.white } }, fill: COLORS.navy, alignment: { horizontal: 'center' } }),
+  time: (bg) => makeStyle({ font: { sz: 10 }, fill: bg, alignment: { horizontal: 'left' } }),
+  typeAcademic: (bg) => makeStyle({ font: { bold: true, sz: 10, color: { rgb: COLORS.academicType } }, fill: bg, alignment: { horizontal: 'center' } }),
+  typeMat: (bg) => makeStyle({ font: { bold: true, sz: 10, color: { rgb: COLORS.matType } }, fill: bg, alignment: { horizontal: 'center' } }),
+  assignee: (bg) => makeStyle({ font: { sz: 10 }, fill: bg, alignment: { horizontal: 'left', wrapText: true } }),
+  matBlank: (bg) => makeStyle({ font: { italic: true, sz: 10, color: { rgb: COLORS.matHint } }, fill: bg, alignment: { horizontal: 'center' } }),
+  unassigned: (bg) => makeStyle({ font: { italic: true, sz: 10, color: { rgb: COLORS.unassigned } }, fill: bg, alignment: { horizontal: 'center' } }),
+};
 
 function getXlsxLibOrNull() {
   const lib = (typeof globalThis !== 'undefined' && globalThis.XLSX)
@@ -42,10 +85,10 @@ function normalizeToBytes(data) {
 
 function writeWorkbookBytes(XLSX, wb) {
   const writeFn = typeof XLSX.writeXLSX === 'function' ? XLSX.writeXLSX : XLSX.write;
-  // binary is the most reliable output type in our bundled SheetJS build.
+  const opts = { bookType: 'xlsx', cellStyles: true };
   for (const type of ['binary', 'array', 'base64']) {
     try {
-      const bytes = normalizeToBytes(writeFn(wb, { bookType: 'xlsx', type }));
+      const bytes = normalizeToBytes(writeFn(wb, { ...opts, type }));
       if (byteLen(bytes) > 0) return bytes;
     } catch (err) {
       console.warn(`SheetJS write type "${type}" failed:`, err);
@@ -114,6 +157,11 @@ function personExcelValue(p) {
   return p.phoneNumber ? `${name}\n${p.phoneNumber}` : name;
 }
 
+function setStyledCell(XLSX, ws, r, c, value, style) {
+  const ref = XLSX.utils.encode_cell({ r, c });
+  ws[ref] = { t: 's', v: String(value ?? ''), s: style };
+}
+
 function buildAdncoWorkbook(XLSX, roster, students, settings) {
   const map = new Map((students ?? []).map((p) => [p.id, p]));
   const days = groupAdncoSlotsByDay(roster.slots);
@@ -121,37 +169,82 @@ function buildAdncoWorkbook(XLSX, roster, students, settings) {
   const unit = settings?.unitName || 'YouGotFireWatch';
   const generated = new Date().toLocaleString();
   const colCount = 2 + ADNCO_POSITIONS.length;
+  const headerRow = 5;
+  const dataStart = headerRow + 1;
 
-  const rows = [
-    [`${monthLabel} ADNCO Roster`],
-    [`${unit} · Generated ${generated}${roster.finalized ? ' · FINALIZED' : ''}`],
-    ['Positions (in order): Bldg 827 (DNCO, LCpl) · Bldg 827 #2 · Bldg 829 #1 · Bldg 829 #2 · Duty Driver (licensed)'],
-    ['Academic rows are auto-filled. MAT rows are left blank for MAT platoon to complete.'],
-    [],
-    ['Date & Time', 'Type', ...ADNCO_POSITIONS.map((p) => p.label)],
-  ];
+  const rows = Array.from({ length: dataStart + days.length }, () => Array(colCount).fill(''));
+  rows[0][0] = `${monthLabel} ADNCO Roster`;
+  rows[1][0] = `${unit} · Generated ${generated}${roster.finalized ? ' · FINALIZED' : ''}`;
+  rows[2][0] = 'Positions (in order): Bldg 827 (DNCO, LCpl) · Bldg 827 #2 · Bldg 829 #1 · Bldg 829 #2 · Duty Driver (licensed)';
+  rows[3][0] = 'Academic rows are auto-filled. MAT rows are left blank for MAT platoon to complete.';
+  rows[headerRow] = ['Date & Time', 'Type', ...ADNCO_POSITIONS.map((p) => p.label)];
 
-  for (const day of days) {
+  days.forEach((day, idx) => {
+    const r = dataStart + idx;
     const isMat = day.eligibleType === 'MAT';
-    const posCells = ADNCO_POSITIONS.map((pos) => {
+    rows[r][0] = day.timeLabel;
+    rows[r][1] = day.eligibleType;
+    ADNCO_POSITIONS.forEach((pos, pi) => {
       const slot = day.positions[pos.position];
       const p = slot?.personId ? map.get(slot.personId) : null;
-      if (isMat) return '';
-      return personExcelValue(p) || (p ? personCell(p) : '');
+      if (isMat) rows[r][2 + pi] = '';
+      else if (!p) rows[r][2 + pi] = 'Unassigned';
+      else rows[r][2 + pi] = personExcelValue(p) || personCell(p);
     });
-    rows.push([day.timeLabel, day.eligibleType, ...posCells]);
-  }
+  });
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
+
+  setStyledCell(XLSX, ws, 0, 0, rows[0][0], STYLES.title);
+  setStyledCell(XLSX, ws, 1, 0, rows[1][0], roster.finalized
+    ? makeStyle({ font: { sz: 11, bold: true, color: { rgb: COLORS.white } }, fill: COLORS.finalized, alignment: { horizontal: 'center' } })
+    : STYLES.subtitle);
+  setStyledCell(XLSX, ws, 2, 0, rows[2][0], STYLES.info);
+  setStyledCell(XLSX, ws, 3, 0, rows[3][0], STYLES.info);
+  rows[headerRow].forEach((label, c) => setStyledCell(XLSX, ws, headerRow, c, label, STYLES.colHeader));
+
+  days.forEach((day, idx) => {
+    const r = dataStart + idx;
+    const isMat = day.eligibleType === 'MAT';
+    const bg = isMat ? (idx % 2 ? COLORS.matAlt : COLORS.matBg) : (idx % 2 ? COLORS.academicAlt : COLORS.academicBg);
+    setStyledCell(XLSX, ws, r, 0, day.timeLabel, STYLES.time(bg));
+    setStyledCell(XLSX, ws, r, 1, day.eligibleType, isMat ? STYLES.typeMat(bg) : STYLES.typeAcademic(bg));
+    ADNCO_POSITIONS.forEach((pos, pi) => {
+      const slot = day.positions[pos.position];
+      const p = slot?.personId ? map.get(slot.personId) : null;
+      const c = 2 + pi;
+      if (isMat) setStyledCell(XLSX, ws, r, c, '', STYLES.matBlank(bg));
+      else if (!p) setStyledCell(XLSX, ws, r, c, 'Unassigned', STYLES.unassigned(bg));
+      else setStyledCell(XLSX, ws, r, c, personExcelValue(p) || personCell(p), STYLES.assignee(bg));
+    });
+  });
+
   ws['!cols'] = [
-    { wch: 34 },
-    { wch: 11 },
-    ...ADNCO_POSITIONS.map(() => ({ wch: 24 })),
+    { wch: 36 },
+    { wch: 12 },
+    ...ADNCO_POSITIONS.map(() => ({ wch: 22 })),
+  ];
+  ws['!rows'] = [
+    { hpt: 30 },
+    { hpt: 22 },
+    { hpt: 28 },
+    { hpt: 22 },
+    { hpt: 8 },
+    { hpt: 24 },
+    ...days.map(() => ({ hpt: 42 })),
   ];
   ws['!merges'] = [0, 1, 2, 3].map((r) => ({
     s: { r, c: 0 },
     e: { r, c: colCount - 1 },
   }));
+  ws['!freeze'] = { xSplit: 0, ySplit: dataStart, topLeftCell: 'A7', activePane: 'bottomLeft', state: 'frozen' };
+  ws['!printHeader'] = [1, dataStart];
+  ws['!margins'] = { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.3, footer: 0.3 };
+  if (!ws['!pageSetup']) ws['!pageSetup'] = {};
+  ws['!pageSetup'].orientation = 'landscape';
+  ws['!pageSetup'].fitToWidth = 1;
+  ws['!pageSetup'].fitToHeight = 0;
+  ws['!pageSetup'].paperSize = 1;
 
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'ADNCO Roster');
@@ -199,7 +292,7 @@ export async function downloadAdncoExcel(roster, students, settings) {
     console.error('ADNCO Excel export failed:', err);
     alert(
       `Could not create Excel file (export ${EXPORT_BUILD}):\n\n${err.message}\n\n`
-      + 'Try Ctrl+Shift+R to hard refresh. Footer should show v2026.07.06.'
+      + 'Try Ctrl+Shift+R to hard refresh. Footer should show v2026.07.07.'
     );
     return false;
   }
