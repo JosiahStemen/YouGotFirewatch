@@ -25,7 +25,7 @@ import {
 } from './adncoTab.js';
 import { normalizeStudentList } from './personnelUtils.js';
 
-export const APP_VERSION = '2026.06.24';
+export const APP_VERSION = '2026.06.24b';
 
 // ─── State ───────────────────────────────────────────────────────────────────
 let state = {
@@ -781,7 +781,7 @@ function showHelpModal() {
      <div class="card mb-3" style="padding:1rem"><strong>Duty Windows</strong>
        <p class="text-sm text-muted mt-1"><span class="badge-mat">MAT</span> Sun 1630→Mon 0630 through Fri 0630→1630 · <span class="badge-academic">Academic</span> Fri 1630→Sat 0630 through Sun 0630→1630. Fri &amp; Sun each have two duty periods.</p></div>
      <div class="card" style="padding:1rem"><strong>✏ ADNCO Calendar</strong>
-       <p class="text-sm text-muted mt-1">Click days to pre-assign or add notes. DNCO slot always requires an LCpl; driver slot requires license Y in the CSV.</p></div>`,
+       <p class="text-sm text-muted mt-1">Click days to pre-assign, add notes, or override <strong>MAT ↔ Academic</strong> per period (e.g. 96 liberty). DNCO requires LCpl; driver requires license Y.</p></div>`,
     `<button class="btn btn-primary" data-action="close-modal" style="width:100%">Got It</button>`, 'lg');
 }
 

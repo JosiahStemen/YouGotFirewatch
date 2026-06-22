@@ -89,6 +89,40 @@ export function inferLegacyPeriodId(startDateIso) {
   return 'day';
 }
 
+export function getDefaultEligibleType(startDateIso, periodId) {
+  const period = getDutyPeriodsForDate(startDateIso).find((p) => p.periodId === periodId);
+  return period?.eligibleType ?? 'MAT';
+}
+
+function resolvePeriodEligibleType(existing, defaultType) {
+  const typeOverridden = existing?.typeOverridden ?? (existing?.eligibleType != null && existing.eligibleType !== defaultType);
+  return {
+    eligibleType: typeOverridden ? (existing.eligibleType ?? defaultType) : defaultType,
+    typeOverridden: !!typeOverridden,
+  };
+}
+
+/** Override MAT ↔ Academic for one duty period (e.g. 96 liberty). Clears assignments that no longer match. */
+export function applyPeriodEligibleType(slots, startDate, periodId, newType, students) {
+  const defaultType = getDefaultEligibleType(startDate, periodId);
+  const studentMap = new Map((students ?? []).map((p) => [p.id, p]));
+  return slots.map((s) => {
+    const pid = s.periodId ?? inferLegacyPeriodId(s.startDate);
+    if (s.startDate !== startDate || pid !== periodId) return s;
+    let personId = s.personId;
+    if (personId) {
+      const person = studentMap.get(personId);
+      if (!person || person.studentType !== newType) personId = null;
+    }
+    return {
+      ...s,
+      eligibleType: newType,
+      typeOverridden: newType !== defaultType,
+      personId,
+    };
+  });
+}
+
 function slotKey(startDate, periodId, position) {
   return `${startDate}|${periodId}|${position}`;
 }
@@ -117,13 +151,15 @@ function migrateLegacySlots(existingSlots, year, month) {
     const periodId = s.periodId ?? inferLegacyPeriodId(s.startDate);
     const period = getDutyPeriodsForDate(s.startDate).find((p) => p.periodId === periodId)
       ?? getDutyPeriodsForDate(s.startDate)[0];
+    const { eligibleType, typeOverridden } = resolvePeriodEligibleType(s, period.eligibleType);
     return {
       ...s,
       periodId,
       startTime: s.startTime ?? period.startTime,
       endDate: s.endDate ?? period.endDate,
       endTime: s.endTime ?? period.endTime,
-      eligibleType: s.eligibleType ?? period.eligibleType,
+      eligibleType,
+      typeOverridden,
       timeLabel: s.timeLabel ?? formatDutyWindow(s.startDate, period.startTime, period.endDate, period.endTime),
     };
   });
@@ -148,6 +184,7 @@ export function createAdncoSlots(year, month, existingSlots) {
         const key = slotKey(startDate, period.periodId, pos.position);
         const existing = existingByKey.get(key) ?? existingByKey.get(legacySlotKey(startDate, pos.position));
         if (existing) {
+          const { eligibleType, typeOverridden } = resolvePeriodEligibleType(existing, period.eligibleType);
           slots.push({
             ...existing,
             periodId: period.periodId,
@@ -155,7 +192,8 @@ export function createAdncoSlots(year, month, existingSlots) {
             endDate: period.endDate,
             endTime: period.endTime,
             timeLabel,
-            eligibleType: period.eligibleType,
+            eligibleType,
+            typeOverridden,
             position: pos.position,
             positionLabel: pos.label,
           });
@@ -170,6 +208,7 @@ export function createAdncoSlots(year, month, existingSlots) {
           endTime: period.endTime,
           timeLabel,
           eligibleType: period.eligibleType,
+          typeOverridden: false,
           position: pos.position,
           positionLabel: pos.label,
           personId: null,
@@ -194,6 +233,8 @@ export function groupAdncoSlotsByDay(slots) {
         endDate: slot.endDate,
         timeLabel: slot.timeLabel,
         eligibleType: slot.eligibleType,
+        typeOverridden: slot.typeOverridden ?? false,
+        defaultEligibleType: getDefaultEligibleType(slot.startDate, periodId),
         positions: {},
       });
     }
@@ -201,6 +242,7 @@ export function groupAdncoSlotsByDay(slots) {
     group.positions[slot.position] = slot;
     if (slot.timeLabel) group.timeLabel = slot.timeLabel;
     if (slot.eligibleType) group.eligibleType = slot.eligibleType;
+    if (slot.typeOverridden) group.typeOverridden = true;
   }
   return [...map.values()].sort((a, b) =>
     a.startDate.localeCompare(b.startDate)

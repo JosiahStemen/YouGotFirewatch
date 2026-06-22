@@ -8,6 +8,7 @@ import {
   generateAdncoRoster, validateAdncoAssignment, finalizeAdncoRoster,
   createAdncoSlots, countAdncoStaffing, groupAdncoSlotsByDay, groupAdncoCalendarDays,
   ADNCO_POSITIONS, getEligibleStudentsForSlot, inferLegacyPeriodId,
+  applyPeriodEligibleType, getDefaultEligibleType,
 } from './adncoRoster.js';
 import { exportAdncoCSV, openAdncoPrintout } from './adncoExport.js';
 import {
@@ -68,9 +69,21 @@ function renderPeriodSection(period, students, map, readOnly, esc) {
     </tr>`;
   }).join('');
 
-  return `<div class="adnco-period-block mb-4">
+  const defaultType = period.defaultEligibleType ?? getDefaultEligibleType(period.startDate, period.periodId);
+  const overridden = period.typeOverridden || period.eligibleType !== defaultType;
+
+  return `<div class="adnco-period-block mb-4" data-period-id="${period.periodId}">
     <p class="text-sm font-semibold mb-1">${esc(period.timeLabel)}</p>
-    <p class="text-sm text-muted mb-2"><span class="${typeClass}">${period.eligibleType}</span> · 5 positions</p>
+    ${!readOnly ? `<div class="mb-2 flex flex-wrap items-end gap-3">
+      <div><label class="label">Student Type</label>
+        <select class="input w-auto adnco-period-type" data-action="adnco-set-period-type"
+          data-date="${period.startDate}" data-period-id="${period.periodId}" style="min-width:8rem">
+          <option value="MAT" ${period.eligibleType === 'MAT' ? 'selected' : ''}>MAT</option>
+          <option value="Academic" ${period.eligibleType === 'Academic' ? 'selected' : ''}>Academic</option>
+        </select>
+        <p class="hint mb-0">${overridden ? `Overridden (default: ${defaultType})` : `Default: ${defaultType}`} · use for 96s, etc.</p>
+      </div></div>`
+      : `<p class="text-sm text-muted mb-2"><span class="${typeClass}">${period.eligibleType}</span>${overridden ? ' <span class="text-amber text-xs">(overridden)</span>' : ''} · 5 positions</p>`}
     ${!readOnly ? `<div class="mb-2"><label class="label">Period Note</label>
       <input class="input adnco-period-note" data-period-id="${period.periodId}" value="${esc(dayNote)}" placeholder="e.g., field day"></div>`
       : (dayNote ? `<p class="text-sm text-dim mb-2">Note: ${esc(dayNote)}</p>` : '')}
@@ -167,7 +180,7 @@ export function renderAdncoTab(ctx) {
         <div class="mb-1"><span class="badge-mat">MAT</span> Sun <strong>1630</strong>→Mon <strong>0630</strong>, Mon–Thu <strong>0630</strong>→next <strong>0630</strong>, Fri <strong>0630</strong>→<strong>1630</strong></div>
         <div><span class="badge-academic">Academic</span> Fri <strong>1630</strong>→Sat <strong>0630</strong>, Sat <strong>0630</strong>→Sun <strong>0630</strong>, Sun <strong>0630</strong>→<strong>1630</strong></div>
       </div>
-      <p class="text-xs text-dim mt-2">Duty changes at <strong>0630</strong> (Fri &amp; Sun end at <strong>1630</strong>). Fri &amp; Sun each have <strong>two duty periods</strong>. Fair random rotation — one student cannot fill two positions in the same period.</p>
+      <p class="text-xs text-dim mt-2">Duty changes at <strong>0630</strong> (Fri &amp; Sun end at <strong>1630</strong>). Fri &amp; Sun each have <strong>two duty periods</strong>. Click a calendar day to override <strong>MAT ↔ Academic</strong> for 96s or other exceptions.</p>
       <p class="text-xs text-muted mt-1">Staffing: ${staffing.matStudents} MAT students / ${staffing.matPositions} MAT positions (${staffing.matNights} periods × ${staffing.positionsPerPeriod}) · ${staffing.acStudents} Academic / ${staffing.acPositions} Academic positions (${staffing.acNights} periods)</p>
     </div>
 
@@ -399,17 +412,25 @@ export function handleAdncoClick(action, el, ctx) {
     }
     case 'adnco-save-day': {
       const startDate = el.dataset.date;
+      const students = state.adncoStudents ?? [];
+      let slots = ui.adncoSlots;
+      document.querySelectorAll('.adnco-period-type').forEach((select) => {
+        if (select.dataset.date !== startDate) return;
+        slots = applyPeriodEligibleType(
+          slots, select.dataset.date, select.dataset.periodId, select.value, students
+        );
+      });
       const noteInputs = document.querySelectorAll('.adnco-period-note');
-      const notesByPeriod = new Map();
       noteInputs.forEach((input) => {
-        notesByPeriod.set(input.dataset.periodId, input.value?.trim() || undefined);
+        const periodId = input.dataset.periodId;
+        const note = input.value?.trim() || undefined;
+        slots = slots.map((s) => {
+          if (s.startDate !== startDate) return s;
+          if ((s.periodId ?? inferLegacyPeriodId(s.startDate)) !== periodId) return s;
+          return { ...s, note };
+        });
       });
-      ui.adncoSlots = ui.adncoSlots.map((s) => {
-        if (s.startDate !== startDate) return s;
-        const periodId = s.periodId ?? inferLegacyPeriodId(s.startDate);
-        if (!notesByPeriod.has(periodId)) return s;
-        return { ...s, note: notesByPeriod.get(periodId) };
-      });
+      ui.adncoSlots = slots;
       syncAdncoSlots(ctx);
       closeModal();
       render();
@@ -491,6 +512,20 @@ export function handleAdncoChange(action, el, ctx) {
   }
   if (action === 'adnco-keep-manual') {
     ui.adncoKeepManual = el.checked;
+    return true;
+  }
+  if (action === 'adnco-set-period-type') {
+    const startDate = el.dataset.date;
+    const periodId = el.dataset.periodId;
+    const newType = el.value;
+    ui.adncoSlots = applyPeriodEligibleType(
+      ui.adncoSlots, startDate, periodId, newType, state.adncoStudents ?? []
+    );
+    if (state.currentAdncoRoster) {
+      state.currentAdncoRoster.slots = ui.adncoSlots;
+    }
+    persist();
+    render();
     return true;
   }
   if (action === 'adnco-reassign') {
