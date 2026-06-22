@@ -4,7 +4,9 @@ import { groupAdncoSlotsByDay, ADNCO_POSITIONS } from './adncoRoster.js';
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 function getXlsxLib() {
-  const lib = typeof globalThis !== 'undefined' ? globalThis.XLSX : null;
+  const lib = (typeof globalThis !== 'undefined' && globalThis.XLSX)
+    || (typeof window !== 'undefined' && window.XLSX)
+    || null;
   if (!lib?.utils?.book_new || !lib?.write) {
     throw new Error('Excel library failed to load — hard refresh (Ctrl+F5) and try again.');
   }
@@ -37,11 +39,15 @@ function isZipArchive(bytes) {
 }
 
 function writeWorkbookBytes(XLSX, wb) {
-  const opts = { bookType: 'xlsx', type: 'uint8array' };
-  if (typeof XLSX.writeXLSX === 'function') {
-    return normalizeToBytes(XLSX.writeXLSX(wb, opts));
+  // SheetJS full.min supports type: 'array' | 'binary' | 'base64' | 'buffer' — NOT 'uint8array'.
+  const writeFn = typeof XLSX.writeXLSX === 'function' ? XLSX.writeXLSX : XLSX.write;
+  const opts = { bookType: 'xlsx', type: 'array' };
+  try {
+    return normalizeToBytes(writeFn(wb, opts));
+  } catch (err) {
+    // Fallback: binary string → bytes (also valid PK zip).
+    return normalizeToBytes(writeFn(wb, { bookType: 'xlsx', type: 'binary' }));
   }
-  return normalizeToBytes(XLSX.write(wb, opts));
 }
 
 function openXlsxInNewTab(bytes, filename) {
