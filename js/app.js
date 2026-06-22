@@ -22,12 +22,12 @@ import {
 } from './nonAvailability.js';
 import {
   renderAdncoTab, renderAdncoResults, handleAdncoClick, handleAdncoChange,
-  createAdncoUiDefaults, initAdncoSlots,
+  handleAdncoInput, handleAdncoSubmit, createAdncoUiDefaults, initAdncoSlots,
 } from './adncoTab.js';
 import { groupAdncoSlotsByDay } from './adncoRoster.js';
 import { normalizeStudentList } from './personnelUtils.js';
 
-export const APP_VERSION = '2026.06.27';
+export const APP_VERSION = '2026.06.28';
 
 // ─── State ───────────────────────────────────────────────────────────────────
 let state = {
@@ -634,6 +634,7 @@ function handleChange(e) {
 
 function handleInput(e) {
   const el = e.target;
+  if (handleAdncoInput(el, adncoCtx())) return;
   if (el.dataset?.action === 'search-personnel') { ui.search = el.value; render(); }
   else if (el.dataset?.action === 'settings-field') {
     const field = el.dataset.field;
@@ -647,6 +648,7 @@ function handleInput(e) {
 
 function handleSubmit(e) {
   e.preventDefault();
+  if (handleAdncoSubmit(e.target, adncoCtx())) return;
   if (e.target.dataset?.action === 'save-person') savePerson(e.target);
 }
 

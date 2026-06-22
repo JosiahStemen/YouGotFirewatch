@@ -2,13 +2,14 @@
  * ADNCO Student Rosters tab — fully separate from main duty roster
  */
 
-import { formatMonthYear, getCalendarGridOffset, parseDate } from './dateUtils.js';
+import { formatMonthYear, formatShortDate, getCalendarGridOffset, parseDate, generateId } from './dateUtils.js';
 import { getHolidayName } from './holidays.js';
 import {
   generateAdncoRoster, validateAdncoAssignment, finalizeAdncoRoster,
   createAdncoSlots, countAdncoStaffing, groupAdncoSlotsByDay, groupAdncoCalendarDays,
   ADNCO_POSITIONS, getEligibleStudentsForSlot, inferLegacyPeriodId,
   applyPeriodEligibleType, getDefaultEligibleType,
+  purgeInvalidSlotAssignments, isAdncoUnavailableAllMonth, getAdncoNonAvailabilityInput,
 } from './adncoRoster.js';
 import { exportAdncoCSV, openAdncoPrintout } from './adncoExport.js';
 import {
@@ -16,8 +17,8 @@ import {
   exportAdncoStudentsCSV,
 } from './studentImport.js';
 import { createSampleAdncoStudents } from './sampleData.js';
-import { DAY_NUMBER_HINT } from './dayNumberAvailability.js';
-import { adncoDisplayName } from './personnelUtils.js';
+import { DAY_NUMBER_HINT, parseDayNumberInput, formatDayNumberForDisplay } from './dayNumberAvailability.js';
+import { adncoDisplayName, normalizeStudent } from './personnelUtils.js';
 import { openCSVInNewTab } from './export.js';
 
 export function upsertAdncoHistory(state, roster) {
@@ -39,6 +40,9 @@ export function createAdncoUiDefaults() {
     adncoSlots: [],
     adncoModalDate: null,
     viewingAdncoHistory: null,
+    adncoShowStudentForm: false,
+    adncoEditingStudent: null,
+    adncoSearch: '',
   };
 }
 
@@ -122,6 +126,121 @@ function renderPeriodSection(period, students, map, readOnly, esc, year, month) 
   </div>`;
 }
 
+function studentNALabel(student) {
+  const input = getAdncoNonAvailabilityInput(student);
+  if (!input) return '';
+  if (isAdncoUnavailableAllMonth(student)) return 'Unavailable all month (no duty assigned)';
+  return `Unavailable days: ${formatDayNumberForDisplay(input)}`;
+}
+
+function refreshAdncoSlotsAfterStudentChange(ctx) {
+  const { state, ui } = ctx;
+  if (!ui.adncoSlots?.length) return;
+  ui.adncoSlots = purgeInvalidSlotAssignments(
+    ui.adncoSlots, state.adncoStudents ?? [], ui.adncoYear, ui.adncoMonth
+  );
+  syncAdncoSlots(ctx);
+}
+
+function renderAdncoStudentCard(s, esc, year, month) {
+  const typeClass = s.studentType === 'MAT' ? 'badge-mat' : 'badge-academic';
+  const na = studentNALabel(s);
+  return `<div class="card person-card">
+    <div class="flex justify-between mb-3">
+      <div>
+        <span class="person-rank">${esc(s.rank)}</span>
+        <h3>${esc(s.lastName)}, ${esc(s.firstName)}</h3>
+        <span class="${typeClass}">${esc(s.studentType)}</span>
+      </div>
+      <div class="flex gap-2">
+        <button class="btn btn-secondary btn-sm" data-action="adnco-edit-student" data-id="${s.id}">Edit</button>
+        <button class="btn btn-danger btn-sm" data-action="adnco-delete-student" data-id="${s.id}">Del</button>
+      </div>
+    </div>
+    <div class="flex flex-wrap gap-4 text-sm">
+      <div><span class="text-dim">Phone</span><div>${s.phoneNumber ? esc(s.phoneNumber) : '—'}</div></div>
+      <div><span class="text-dim">Driver</span><div>${s.driversLicense ? '<span class="text-olive">Y</span>' : 'N'}</div></div>
+      <div><span class="text-dim">Last Duty</span><div>${s.lastAdncoDutyDate ? formatShortDate(s.lastAdncoDutyDate) : 'Never'}</div></div>
+    </div>
+    ${na ? `<div class="na-badge">⚠ ${esc(na)} <span class="text-dim">(applies when generating ${formatMonthYear(month, year)})</span></div>` : ''}
+  </div>`;
+}
+
+function renderAdncoStudentForm(ctx) {
+  const { ui, esc } = ctx;
+  const s = ui.adncoEditingStudent;
+  const naVal = s?.adncoNonAvailabilityInput ?? getAdncoNonAvailabilityInput(s ?? {}) ?? '';
+  return `<form class="card mb-4" data-action="adnco-save-student">
+    <h3 class="mb-4 font-semibold">${s ? 'Edit' : 'Add'} Student</h3>
+    <div class="grid-4 gap-3 mb-3">
+      <div><label class="label">Rank</label><input class="input" name="rank" value="${esc(s?.rank)}" required></div>
+      <div><label class="label">Last Name</label><input class="input" name="lastName" value="${esc(s?.lastName)}" required></div>
+      <div><label class="label">First Name</label><input class="input" name="firstName" value="${esc(s?.firstName)}" required></div>
+      <div><label class="label">Phone</label><input class="input" name="phoneNumber" value="${esc(s?.phoneNumber)}"></div>
+      <div><label class="label">Student Type</label>
+        <select class="input" name="studentType" required>
+          <option value="MAT" ${s?.studentType === 'MAT' ? 'selected' : ''}>MAT</option>
+          <option value="Academic" ${s?.studentType === 'Academic' ? 'selected' : ''}>Academic</option>
+        </select></div>
+      <div><label class="label">Driver&apos;s License</label>
+        <select class="input" name="driversLicense">
+          <option value="N" ${!s?.driversLicense ? 'selected' : ''}>N</option>
+          <option value="Y" ${s?.driversLicense ? 'selected' : ''}>Y</option>
+        </select></div>
+      <div><label class="label">Last ADNCO Duty</label>
+        <input class="input" type="date" name="lastAdncoDutyDate" value="${esc(s?.lastAdncoDutyDate || '')}"></div>
+    </div>
+    <div class="mb-3">
+      <label class="label">Non-Availability (for roster month)</label>
+      <input class="input" name="non_availability" value="${esc(naVal)}" placeholder="blank = available · all = no duty · 5 · 12-14, 20-22">
+      <p class="hint">${DAY_NUMBER_HINT}. <strong>all</strong> = skip duty entirely that month.</p>
+    </div>
+    <div class="flex gap-3 justify-end">
+      <button type="button" class="btn btn-secondary" data-action="adnco-cancel-student-form">Cancel</button>
+      <button type="submit" class="btn btn-primary">${s ? 'Update' : 'Add'} Student</button>
+    </div>
+  </form>`;
+}
+
+function renderAdncoStudentsPanel(ctx) {
+  const { state, ui, esc } = ctx;
+  const students = state.adncoStudents ?? [];
+
+  if (!students.length && !ui.adncoShowStudentForm) {
+    return `<div class="empty-state" style="padding:1.5rem"><div class="empty-icon">🎓</div><h3>No Students Yet</h3>
+      <p>Add students here for quick edits, or import a CSV backup below.</p>
+      <div class="flex gap-3 justify-center flex-wrap">
+        <button class="btn btn-primary" data-action="adnco-show-student-form">Add Student</button>
+        <button class="btn btn-secondary" data-action="adnco-import-students">Import Backup</button>
+        <button class="btn btn-secondary" data-action="adnco-load-sample">Load Sample</button>
+      </div></div>`;
+  }
+
+  const q = ui.adncoSearch.toLowerCase();
+  const filtered = students.filter((s) =>
+    !q
+    || s.rank.toLowerCase().includes(q)
+    || s.lastName.toLowerCase().includes(q)
+    || s.firstName.toLowerCase().includes(q)
+    || s.studentType.toLowerCase().includes(q)
+    || (s.phoneNumber || '').toLowerCase().includes(q)
+  );
+
+  return `
+    <div class="flex flex-wrap justify-between items-center gap-3 mb-3">
+      <p class="text-sm text-muted">${students.length} student${students.length !== 1 ? 's' : ''} — manage ADNCO roster here</p>
+      <div class="flex flex-wrap gap-2">
+        <button class="btn btn-primary btn-sm" data-action="adnco-show-student-form">+ Add Student</button>
+        <button class="btn btn-secondary btn-sm" data-action="adnco-load-sample">Load Sample</button>
+      </div>
+    </div>
+    <input class="input mb-3" style="max-width:20rem" placeholder="Search students..." value="${esc(ui.adncoSearch)}" data-action="adnco-search-students">
+    ${ui.adncoShowStudentForm ? renderAdncoStudentForm(ctx) : ''}
+    <div class="grid-3">${filtered.map((s) => renderAdncoStudentCard(s, esc, ui.adncoYear, ui.adncoMonth)).join('')}</div>
+    ${!filtered.length && ui.adncoSearch ? '<p class="text-center text-dim">No matches.</p>' : ''}
+  `;
+}
+
 function renderAdncoBackupCard(ctx) {
   const { state } = ctx;
   const count = (state.adncoStudents ?? []).length;
@@ -156,21 +275,6 @@ function renderPositionCell(slot, students, map, readOnly, esc, year, month) {
 export function renderAdncoTab(ctx) {
   const { state, ui, esc } = ctx;
   const students = state.adncoStudents ?? [];
-
-  if (!students.length) {
-    return `<div class="adnco-header mb-4">
-      <h2 style="font-size:1.25rem;font-weight:600">Generate ADNCOs</h2>
-      <p class="text-sm text-muted">Completely separate from the OOD personnel list</p>
-    </div>
-    <div class="empty-state"><div class="empty-icon">🎓</div><h3>No Students Yet</h3>
-      <p>Import a student CSV or load sample students. This does not use the main Personnel list.</p>
-      <div class="flex gap-3 justify-center flex-wrap">
-        <button class="btn btn-primary" data-action="adnco-import-students">Import Student CSV</button>
-        <button class="btn btn-secondary" data-action="adnco-student-template">Download Template</button>
-        <button class="btn btn-secondary" data-action="adnco-load-sample">Load Sample Students</button>
-      </div></div>`;
-  }
-
   const years = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 1 + i);
   const roster = state.currentAdncoRoster;
   const isFinalized = roster?.finalized;
@@ -197,6 +301,14 @@ export function renderAdncoTab(ctx) {
       </div>
     </div>
 
+    <details class="card mb-4 personnel-panel" ${!students.length || ui.adncoShowStudentForm ? 'open' : ''}>
+      <summary class="font-semibold" style="cursor:pointer;list-style:none;display:flex;align-items:center;gap:0.5rem">
+        <span>🎓 Students</span>
+        <span class="text-sm text-muted font-normal">${students.length ? `(${students.length})` : '— add before generating'}</span>
+      </summary>
+      <div class="mt-3">${renderAdncoStudentsPanel(ctx)}</div>
+    </details>
+
     ${renderAdncoBackupCard(ctx)}
 
     <div class="card adnco-rules mb-4">
@@ -218,6 +330,11 @@ export function renderAdncoTab(ctx) {
 
     ${renderAdminWorkflow(ctx)}
   `;
+
+  if (!students.length) {
+    html += `<div class="info-box">Add at least one student above before generating an ADNCO roster.</div>`;
+    return html;
+  }
 
   if (!ui.adncoGenerated || !roster) {
     html += `<div class="card mb-4"><h3 class="mb-4 font-semibold">Calendar Editor — ${formatMonthYear(ui.adncoMonth, ui.adncoYear)}</h3>
@@ -369,6 +486,39 @@ export function handleAdncoClick(action, el, ctx) {
       toast('Sample ADNCO students loaded');
       render();
       return true;
+    case 'adnco-show-student-form':
+      ui.adncoShowStudentForm = true;
+      ui.adncoEditingStudent = null;
+      render();
+      return true;
+    case 'adnco-cancel-student-form':
+      ui.adncoShowStudentForm = false;
+      ui.adncoEditingStudent = null;
+      render();
+      return true;
+    case 'adnco-edit-student': {
+      const s = (state.adncoStudents ?? []).find((x) => x.id === el.dataset.id);
+      if (s) {
+        ui.adncoEditingStudent = s;
+        ui.adncoShowStudentForm = true;
+        render();
+      }
+      return true;
+    }
+    case 'adnco-delete-student': {
+      const id = el.dataset.id;
+      const s = (state.adncoStudents ?? []).find((x) => x.id === id);
+      if (!s || !confirm(`Delete ${adncoDisplayName(s)}?`)) return true;
+      state.adncoStudents = (state.adncoStudents ?? []).filter((x) => x.id !== id);
+      ui.adncoSlots = (ui.adncoSlots ?? []).map((slot) =>
+        slot.personId === id ? { ...slot, personId: null } : slot
+      );
+      refreshAdncoSlotsAfterStudentChange(ctx);
+      persist();
+      toast('Student deleted');
+      render();
+      return true;
+    }
     case 'adnco-generate': {
       const result = generateAdncoRoster(
         ui.adncoYear, ui.adncoMonth, state.adncoStudents ?? [],
@@ -524,6 +674,57 @@ export function handleAdncoClick(action, el, ctx) {
     default:
       return false;
   }
+}
+
+export function handleAdncoInput(el, ctx) {
+  if (el.dataset?.action === 'adnco-search-students') {
+    ctx.ui.adncoSearch = el.value;
+    ctx.render();
+    return true;
+  }
+  return false;
+}
+
+export function handleAdncoSubmit(form, ctx) {
+  if (form.dataset?.action !== 'adnco-save-student') return false;
+  const { state, ui, persist, render, toast } = ctx;
+  const fd = new FormData(form);
+  const na = parseDayNumberInput(fd.get('non_availability') || '');
+  if (na.error) {
+    alert(na.error);
+    return true;
+  }
+  const studentType = fd.get('studentType')?.trim();
+  if (studentType !== 'MAT' && studentType !== 'Academic') {
+    alert('Student type must be MAT or Academic.');
+    return true;
+  }
+  const lastDuty = fd.get('lastAdncoDutyDate')?.trim() || null;
+  const student = normalizeStudent({
+    id: ui.adncoEditingStudent?.id || generateId(),
+    rank: fd.get('rank').trim(),
+    lastName: fd.get('lastName').trim(),
+    firstName: fd.get('firstName').trim(),
+    phoneNumber: fd.get('phoneNumber')?.trim() || '',
+    studentType,
+    driversLicense: fd.get('driversLicense') === 'Y',
+    lastAdncoDutyDate: lastDuty,
+    adncoDutyCount: ui.adncoEditingStudent?.adncoDutyCount ?? 0,
+    adncoNonAvailabilityInput: na.normalized || '',
+  });
+  if (ui.adncoEditingStudent) {
+    const idx = (state.adncoStudents ?? []).findIndex((x) => x.id === student.id);
+    if (idx >= 0) state.adncoStudents[idx] = student;
+  } else {
+    state.adncoStudents = [...(state.adncoStudents ?? []), student];
+  }
+  ui.adncoShowStudentForm = false;
+  ui.adncoEditingStudent = null;
+  refreshAdncoSlotsAfterStudentChange(ctx);
+  persist();
+  toast('Student saved');
+  render();
+  return true;
 }
 
 export function handleAdncoChange(action, el, ctx) {
