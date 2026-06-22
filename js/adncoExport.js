@@ -2,7 +2,7 @@ import { formatMonthYear } from './dateUtils.js';
 import { groupAdncoSlotsByDay, ADNCO_POSITIONS } from './adncoRoster.js';
 
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-const EXPORT_BUILD = '20260708';
+const EXPORT_BUILD = '20260709';
 
 /** Mirrors openAdncoPrintout() CSS — keep in sync when changing print layout. */
 export const ADNCO_PRINT_THEME = {
@@ -144,7 +144,8 @@ function normalizeToBytes(data) {
 }
 
 function writeWorkbookBytes(XLSX, wb) {
-  const writeFn = typeof XLSX.writeXLSX === 'function' ? XLSX.writeXLSX : XLSX.write;
+  // xlsx-js-style only initializes its style writer in XLSX.write — writeXLSX skips yo setup.
+  const writeFn = XLSX.write;
   const opts = { bookType: 'xlsx', cellStyles: true };
   for (const type of ['binary', 'array', 'base64']) {
     try {
@@ -347,7 +348,7 @@ export async function downloadAdncoExcel(roster, students, settings) {
     console.error('ADNCO Excel export failed:', err);
     alert(
       `Could not create Excel file (export ${EXPORT_BUILD}):\n\n${err.message}\n\n`
-      + 'Try Ctrl+Shift+R to hard refresh. Footer should show v2026.07.08.'
+      + 'Try Ctrl+Shift+R to hard refresh. Footer should show v2026.07.09.'
     );
     return false;
   }
