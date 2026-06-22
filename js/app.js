@@ -27,7 +27,7 @@ import {
 import { groupAdncoSlotsByDay } from './adncoRoster.js';
 import { normalizeStudentList } from './personnelUtils.js';
 
-export const APP_VERSION = '2026.07.09';
+export const APP_VERSION = '2026.07.10';
 
 // ─── State ───────────────────────────────────────────────────────────────────
 let state = {

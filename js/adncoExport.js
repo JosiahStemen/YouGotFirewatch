@@ -2,7 +2,8 @@ import { formatMonthYear } from './dateUtils.js';
 import { groupAdncoSlotsByDay, ADNCO_POSITIONS } from './adncoRoster.js';
 
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-const EXPORT_BUILD = '20260709';
+const EXPORT_BUILD = '20260710';
+const MAT_PLACEHOLDER = 'MAT';
 
 /** Mirrors openAdncoPrintout() CSS — keep in sync when changing print layout. */
 export const ADNCO_PRINT_THEME = {
@@ -84,9 +85,9 @@ const PRINT_STYLES = {
   }),
   assignee: (bg) => makeStyle({ font: { sz: 10 }, fill: bg, alignment: { horizontal: 'left', vertical: 'top', wrapText: true } }),
   matManual: makeStyle({
-    font: { italic: true, sz: 10, color: { rgb: ADNCO_PRINT_THEME.subText } },
+    font: { bold: true, sz: 10, color: { rgb: ADNCO_PRINT_THEME.typeMatText } },
     fill: ADNCO_PRINT_THEME.matManualBg,
-    alignment: { horizontal: 'left', vertical: 'top' },
+    alignment: { horizontal: 'center', vertical: 'center' },
   }),
   unassigned: (bg) => makeStyle({
     font: { italic: true, sz: 10, color: { rgb: ADNCO_PRINT_THEME.subText } },
@@ -115,10 +116,22 @@ function getXlsxLibOrNull() {
   return lib;
 }
 
+function ensureStyledXlsxLib(XLSX) {
+  if (!XLSX?.style_version) {
+    throw new Error(
+      'Excel styling library did not load (expected xlsx-js-style). '
+      + 'Hard refresh with Ctrl+Shift+R and confirm footer shows v2026.07.10.'
+    );
+  }
+}
+
 async function waitForXlsxLib() {
   for (let i = 0; i < 80; i++) {
     const lib = getXlsxLibOrNull();
-    if (lib) return lib;
+    if (lib) {
+      ensureStyledXlsxLib(lib);
+      return lib;
+    }
     await new Promise((r) => setTimeout(r, 50));
   }
   throw new Error('Excel library failed to load. Check your connection, hard refresh (Ctrl+Shift+R), and try again.');
@@ -143,19 +156,31 @@ function normalizeToBytes(data) {
   throw new Error(`Unexpected Excel output (${Object.prototype.toString.call(data)})`);
 }
 
+function xlsxBytesIncludeThemeColors(bytes) {
+  if (!bytes?.length) return false;
+  const sample = bytes.length > 600000 ? bytes.subarray(0, 600000) : bytes;
+  let text = '';
+  for (let i = 0; i < sample.length; i++) text += String.fromCharCode(sample[i]);
+  return text.includes('FF1A2332') || text.includes('1A2332');
+}
+
 function writeWorkbookBytes(XLSX, wb) {
   // xlsx-js-style only initializes its style writer in XLSX.write — writeXLSX skips yo setup.
-  const writeFn = XLSX.write;
-  const opts = { bookType: 'xlsx', cellStyles: true };
-  for (const type of ['binary', 'array', 'base64']) {
+  const opts = { bookType: 'xlsx', type: 'binary', cellStyles: true };
+  let lastErr = null;
+  for (const type of ['binary', 'array']) {
     try {
-      const bytes = normalizeToBytes(writeFn(wb, { ...opts, type }));
-      if (byteLen(bytes) > 0) return bytes;
+      const bytes = normalizeToBytes(XLSX.write(wb, { ...opts, type }));
+      if (byteLen(bytes) > 0) {
+        if (xlsxBytesIncludeThemeColors(bytes)) return bytes;
+        lastErr = new Error('Excel file was created but colors were missing from the output.');
+      }
     } catch (err) {
-      console.warn(`SheetJS write type "${type}" failed:`, err);
+      lastErr = err;
+      console.warn(`Excel write type "${type}" failed:`, err);
     }
   }
-  throw new Error('SheetJS could not serialize the workbook');
+  throw lastErr || new Error('SheetJS could not serialize the workbook');
 }
 
 function triggerDirectDownload(bytes, filename) {
@@ -192,7 +217,7 @@ function openXlsxInNewTab(bytes, filename) {
   .hint { font-size: 0.8rem; color: #6b7280; }
 </style></head><body>
 <h1>${safeName}</h1>
-<p>Real Excel <strong>.xlsx</strong> file — open in Microsoft Excel. Academic rows are filled; <strong>MAT rows are blank</strong> for platoon to complete.</p>
+<p>Real Excel <strong>.xlsx</strong> file — open in <strong>desktop Microsoft Excel</strong> for full colors. Academic rows are filled; <strong>MAT position cells show MAT</strong> for platoon to replace with names.</p>
 <a class="dl" id="dl" href="${blobUrl}" download="${safeName}">Download .xlsx</a>
 <p class="hint">If download did not start, click the button above. Close this tab to return to YouGotFireWatch.</p>
 <script>
@@ -218,9 +243,8 @@ function personExcelValue(p) {
   return p.phoneNumber ? `${name}\n${p.phoneNumber}` : name;
 }
 
-function setStyledCell(XLSX, ws, r, c, value, style) {
-  const ref = XLSX.utils.encode_cell({ r, c });
-  ws[ref] = { t: 's', v: String(value ?? ''), s: style };
+function styledCell(value, style) {
+  return { t: 's', v: String(value ?? ''), s: style };
 }
 
 function buildAdncoWorkbook(XLSX, roster, students, settings) {
@@ -234,47 +258,32 @@ function buildAdncoWorkbook(XLSX, roster, students, settings) {
   const dataStart = headerRow + 1;
 
   const rows = Array.from({ length: dataStart + days.length }, () => Array(colCount).fill(''));
-  rows[0][0] = adncoPrintTitle(roster);
-  rows[1][0] = `${unit} · Generated ${generated}`;
-  rows[2][0] = `${rulesLine1}\n${rulesLine2}`;
-  rows[headerRow] = ['Date & Time', 'Type', ...ADNCO_POSITIONS.map((p) => p.label)];
-
-  days.forEach((day, idx) => {
-    const r = dataStart + idx;
-    const isMat = day.eligibleType === 'MAT';
-    rows[r][0] = day.timeLabel;
-    rows[r][1] = day.eligibleType;
-    ADNCO_POSITIONS.forEach((pos, pi) => {
-      const slot = day.positions[pos.position];
-      const p = slot?.personId ? map.get(slot.personId) : null;
-      if (isMat) rows[r][2 + pi] = 'MAT — fill in Excel';
-      else if (!p) rows[r][2 + pi] = 'Unassigned';
-      else rows[r][2 + pi] = personExcelValue(p) || personCell(p);
-    });
-  });
-
-  const ws = XLSX.utils.aoa_to_sheet(rows);
-
-  setStyledCell(XLSX, ws, 0, 0, rows[0][0], roster.finalized ? PRINT_STYLES.titleFinalized : PRINT_STYLES.title);
-  setStyledCell(XLSX, ws, 1, 0, rows[1][0], PRINT_STYLES.subtitle);
-  setStyledCell(XLSX, ws, 2, 0, rows[2][0], PRINT_STYLES.rules);
-  rows[headerRow].forEach((label, c) => setStyledCell(XLSX, ws, headerRow, c, label, PRINT_STYLES.colHeader));
+  rows[0][0] = styledCell(adncoPrintTitle(roster), roster.finalized ? PRINT_STYLES.titleFinalized : PRINT_STYLES.title);
+  rows[1][0] = styledCell(`${unit} · Generated ${generated}`, PRINT_STYLES.subtitle);
+  rows[2][0] = styledCell(`${rulesLine1}\n${rulesLine2}`, PRINT_STYLES.rules);
+  rows[headerRow] = [
+    styledCell('Date & Time', PRINT_STYLES.colHeader),
+    styledCell('Type', PRINT_STYLES.colHeader),
+    ...ADNCO_POSITIONS.map((p) => styledCell(p.label, PRINT_STYLES.colHeader)),
+  ];
 
   days.forEach((day, idx) => {
     const r = dataStart + idx;
     const isMat = day.eligibleType === 'MAT';
     const bg = rowBg(idx);
-    setStyledCell(XLSX, ws, r, 0, day.timeLabel, PRINT_STYLES.dataCell(bg));
-    setStyledCell(XLSX, ws, r, 1, day.eligibleType, isMat ? PRINT_STYLES.typeMat : PRINT_STYLES.typeAcademic);
+    rows[r][0] = styledCell(day.timeLabel, PRINT_STYLES.dataCell(bg));
+    rows[r][1] = styledCell(day.eligibleType, isMat ? PRINT_STYLES.typeMat : PRINT_STYLES.typeAcademic);
     ADNCO_POSITIONS.forEach((pos, pi) => {
       const slot = day.positions[pos.position];
       const p = slot?.personId ? map.get(slot.personId) : null;
       const c = 2 + pi;
-      if (isMat) setStyledCell(XLSX, ws, r, c, 'MAT — fill in Excel', PRINT_STYLES.matManual);
-      else if (!p) setStyledCell(XLSX, ws, r, c, 'Unassigned', PRINT_STYLES.unassigned(bg));
-      else setStyledCell(XLSX, ws, r, c, personExcelValue(p) || personCell(p), PRINT_STYLES.assignee(bg));
+      if (isMat) rows[r][c] = styledCell(MAT_PLACEHOLDER, PRINT_STYLES.matManual);
+      else if (!p) rows[r][c] = styledCell('Unassigned', PRINT_STYLES.unassigned(bg));
+      else rows[r][c] = styledCell(personExcelValue(p) || personCell(p), PRINT_STYLES.assignee(bg));
     });
   });
+
+  const ws = XLSX.utils.aoa_to_sheet(rows, { cellStyles: true });
 
   ws['!cols'] = [
     { wch: 34 },
@@ -348,7 +357,7 @@ export async function downloadAdncoExcel(roster, students, settings) {
     console.error('ADNCO Excel export failed:', err);
     alert(
       `Could not create Excel file (export ${EXPORT_BUILD}):\n\n${err.message}\n\n`
-      + 'Try Ctrl+Shift+R to hard refresh. Footer should show v2026.07.09.'
+      + 'Try Ctrl+Shift+R to hard refresh. Footer should show v2026.07.10.'
     );
     return false;
   }
