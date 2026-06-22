@@ -35,6 +35,7 @@ export function loadAppState() {
       data.settings.unitName = DEFAULT_SETTINGS.unitName;
     }
     if (!data.adncoHistory) data.adncoHistory = [];
+    if (!data.adncoStudents) data.adncoStudents = [];
     return data;
   } catch { return null; }
 }
@@ -51,6 +52,7 @@ export function exportAppData(state) {
     settings: state.settings,
     history: state.history,
     adncoHistory: state.adncoHistory ?? [],
+    adncoStudents: state.adncoStudents ?? [],
   }, null, 2);
 }
 
@@ -62,6 +64,7 @@ export function importAppData(json) {
       settings: { ...DEFAULT_SETTINGS, ...data.settings },
       history: data.history ?? [],
       adncoHistory: data.adncoHistory ?? [],
+      adncoStudents: data.adncoStudents ?? [],
     };
   } catch { return null; }
 }

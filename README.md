@@ -54,8 +54,9 @@ A **separate tab** for Academic and MAT student ADNCO duty — independent from 
 - **MAT** — Sunday 1630 through Friday 1630
 - **Academic** — Friday 1630 through Sunday 1630 (no duty the night before a class day)
 
-**Personnel fields for students:**
-- `phoneNumber`, `studentType` (Academic or MAT), `lastName`, `firstName`
+**Student list (completely separate from main Personnel):**
+- Managed only in the **ADNCO Student Rosters** tab — not the Personnel tab
+- Fields: `phoneNumber`, `studentType` (Academic or MAT), `lastName`, `firstName`
 - CSV columns: `rank, lastName, firstName, phoneNumber, studentType, points, lastDutyDate, nonAvailability`
 
 **Simple non-availability (for junior Marines):**
@@ -75,8 +76,8 @@ Use **only day numbers** for the month — no calendars, no full dates.
 4. Click **Update My Availability**
 
 **Generating an ADNCO roster:**
-1. Add/import students with `studentType` set to Academic or MAT
-2. Open **ADNCO Student Rosters**, pick month/year
+1. In **ADNCO Student Rosters**, import students (or load samples) with `studentType` set to Academic or MAT
+2. Pick month/year
 3. Click **Generate ADNCO Roster**
 4. Review assignments (phone numbers shown prominently)
 5. **Finalize** — saved separately from main duty history; opens a printable roster

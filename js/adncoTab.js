@@ -1,5 +1,5 @@
 /**
- * ADNCO Student Rosters tab — UI and actions
+ * ADNCO Student Rosters tab — fully separate from main duty roster
  */
 
 import { formatMonthYear } from './dateUtils.js';
@@ -9,10 +9,12 @@ import {
 } from './adncoRoster.js';
 import { exportAdncoCSV, openAdncoPrintout } from './adncoExport.js';
 import {
-  getStudentImportTemplate, parseStudentImportCSV, mergeStudentsIntoPersonnel,
+  getStudentImportTemplate, parseStudentImportCSV, mergeStudentsIntoRoster,
+  exportAdncoStudentsCSV,
 } from './studentImport.js';
+import { createSampleAdncoStudents } from './sampleData.js';
 import { DAY_NUMBER_PLACEHOLDER, DAY_NUMBER_HINT } from './dayNumberAvailability.js';
-import { getAdncoStudents, adncoDisplayName, displayName } from './personnelUtils.js';
+import { adncoDisplayName } from './personnelUtils.js';
 import { openCSVInNewTab } from './export.js';
 
 export function createAdncoUiDefaults() {
@@ -31,19 +33,19 @@ export function createAdncoUiDefaults() {
 
 export function renderAdncoTab(ctx) {
   const { state, ui, esc } = ctx;
-  const students = getAdncoStudents(state.personnel);
+  const students = state.adncoStudents ?? [];
 
   if (!students.length) {
     return `<div class="adnco-header mb-4">
       <h2 style="font-size:1.25rem;font-weight:600">ADNCO Student Rosters</h2>
-      <p class="text-sm text-muted">Separate from main fire watch duty — for Academic &amp; MAT student schedules</p>
+      <p class="text-sm text-muted">Completely separate from Personnel and main fire watch duty</p>
     </div>
     <div class="empty-state"><div class="empty-icon">🎓</div><h3>No ADNCO Students Yet</h3>
-      <p>Add students in Personnel (set studentType) or import a student CSV.</p>
+      <p>Import a student CSV or load sample students. This does not use the main Personnel list.</p>
       <div class="flex gap-3 justify-center flex-wrap">
-        <button class="btn btn-primary" data-action="tab" data-tab="personnel">Go to Personnel</button>
-        <button class="btn btn-secondary" data-action="adnco-import-students">Import Student CSV</button>
+        <button class="btn btn-primary" data-action="adnco-import-students">Import Student CSV</button>
         <button class="btn btn-secondary" data-action="adnco-student-template">Download Template</button>
+        <button class="btn btn-secondary" data-action="adnco-load-sample">Load Sample Students</button>
       </div></div>`;
   }
 
@@ -52,7 +54,7 @@ export function renderAdncoTab(ctx) {
   const isFinalized = roster?.finalized;
   const staffing = countAdncoStaffing(
     roster?.slots || createAdncoSlots(ui.adncoYear, ui.adncoMonth),
-    state.personnel
+    students
   );
 
   let html = `
@@ -60,7 +62,7 @@ export function renderAdncoTab(ctx) {
       <div class="flex flex-wrap justify-between items-center gap-4">
         <div>
           <h2 style="font-size:1.25rem;font-weight:600">ADNCO Student Rosters</h2>
-          <p class="text-sm text-muted">${students.length} student${students.length !== 1 ? 's' : ''} · separate from main duty roster</p>
+          <p class="text-sm text-muted">${students.length} student${students.length !== 1 ? 's' : ''} · independent from main Personnel tab</p>
         </div>
         <div class="flex gap-2 flex-wrap">
           <select class="input w-auto" data-action="adnco-set-month">${Array.from({ length: 12 }, (_, i) =>
@@ -87,7 +89,8 @@ export function renderAdncoTab(ctx) {
 
     <div class="flex flex-wrap gap-2 mb-4">
       <button class="btn btn-secondary btn-sm" data-action="adnco-import-students">⬆ Import Students</button>
-      <button class="btn btn-secondary btn-sm" data-action="adnco-student-template">📄 Student Template</button>
+      <button class="btn btn-secondary btn-sm" data-action="adnco-export-students">⬇ Export Student List</button>
+      <button class="btn btn-secondary btn-sm" data-action="adnco-student-template">📄 Template</button>
     </div>
   `;
 
@@ -107,7 +110,7 @@ export function renderAdncoTab(ctx) {
         <button class="btn btn-primary" data-action="adnco-show-finalize">🔒 Finalize ADNCO Roster</button>
       </div>`;
     } else {
-      html += `<p class="text-center text-olive mt-4">✓ ADNCO roster finalized and saved separately from main duty.</p>`;
+      html += `<p class="text-center text-olive mt-4">✓ ADNCO roster finalized — stored separately from main duty history.</p>`;
     }
   }
 
@@ -120,7 +123,7 @@ export function renderAdncoTab(ctx) {
 
 function renderSelfService(ctx) {
   const { state, ui, esc } = ctx;
-  const students = getAdncoStudents(state.personnel).sort((a, b) => displayName(a).localeCompare(displayName(b)));
+  const students = [...(state.adncoStudents ?? [])].sort((a, b) => adncoDisplayName(a).localeCompare(adncoDisplayName(b)));
   const selected = students.find((p) => p.id === ui.adncoSelfServiceId);
   const naVal = ui.adncoNaDraft !== '' ? ui.adncoNaDraft : (selected?.adncoNonAvailabilityInput ?? '');
 
@@ -148,9 +151,9 @@ function renderSelfService(ctx) {
 function renderAdncoResults(ctx) {
   const { state, ui, esc } = ctx;
   const roster = state.currentAdncoRoster;
-  const map = new Map(state.personnel.map((p) => [p.id, p]));
+  const map = new Map((state.adncoStudents ?? []).map((p) => [p.id, p]));
   const readOnly = roster.finalized;
-  const students = getAdncoStudents(state.personnel);
+  const students = state.adncoStudents ?? [];
 
   const rows = [...roster.slots].sort((a, b) => a.startDate.localeCompare(b.startDate)).map((slot) => {
     const p = slot.personId ? map.get(slot.personId) : null;
@@ -174,7 +177,7 @@ function renderAdncoResults(ctx) {
       <h3 class="font-semibold">ADNCO Roster — ${formatMonthYear(roster.month, roster.year)}</h3>
       <div class="flex gap-2">
         <button class="btn btn-secondary btn-sm" data-action="adnco-print">📄 Print</button>
-        <button class="btn btn-secondary btn-sm" data-action="adnco-export-csv">📊 Export CSV</button>
+        <button class="btn btn-secondary btn-sm" data-action="adnco-export-csv">📊 Export Roster CSV</button>
       </div>
     </div>
     <div class="card"><div class="table-wrap"><table class="data adnco-table">
@@ -205,9 +208,15 @@ export function handleAdncoClick(action, el, ctx) {
   const { state, ui, persist, render, toast, openModal, closeModal } = ctx;
 
   switch (action) {
+    case 'adnco-load-sample':
+      state.adncoStudents = createSampleAdncoStudents();
+      persist();
+      toast('Sample ADNCO students loaded');
+      render();
+      return true;
     case 'adnco-generate': {
       const result = generateAdncoRoster(
-        ui.adncoYear, ui.adncoMonth, state.personnel,
+        ui.adncoYear, ui.adncoMonth, state.adncoStudents ?? [],
         state.currentAdncoRoster, ui.adncoKeepManual
       );
       if (!result.roster) {
@@ -227,21 +236,31 @@ export function handleAdncoClick(action, el, ctx) {
       ctx.triggerFileImport('.csv', (text) => {
         const result = parseStudentImportCSV(text);
         if (result.error) { alert(result.error); return; }
-        state.personnel = mergeStudentsIntoPersonnel(state.personnel, result.students);
+        const msg = (state.adncoStudents?.length)
+          ? `Replace all ${state.adncoStudents.length} students with ${result.students.length} from this file?`
+          : `Load ${result.students.length} students?`;
+        if (!confirm(msg)) return;
+        state.adncoStudents = mergeStudentsIntoRoster([], result.students, true);
         persist();
         if (result.errors?.length) alert('Some rows skipped:\n' + result.errors.join('\n'));
-        toast(`Imported ${result.students.length} student(s)`);
+        toast(`Loaded ${result.students.length} student(s)`);
         render();
       });
       return true;
+    case 'adnco-export-students': {
+      const exp = exportAdncoStudentsCSV(state.adncoStudents ?? []);
+      openCSVInNewTab(exp.content, exp.filename);
+      toast('Student list exported');
+      return true;
+    }
     case 'adnco-student-template':
       openCSVInNewTab(getStudentImportTemplate(), 'YouGotFireWatch-ADNCO-Student-Template.csv');
       return true;
     case 'adnco-save-availability': {
       if (!ui.adncoSelfServiceId) return true;
-      const idx = state.personnel.findIndex((p) => p.id === ui.adncoSelfServiceId);
+      const idx = (state.adncoStudents ?? []).findIndex((p) => p.id === ui.adncoSelfServiceId);
       if (idx < 0) return true;
-      state.personnel[idx].adncoNonAvailabilityInput = ui.adncoNaDraft.trim();
+      state.adncoStudents[idx].adncoNonAvailabilityInput = ui.adncoNaDraft.trim();
       persist();
       toast('Your availability was updated!');
       render();
@@ -249,14 +268,14 @@ export function handleAdncoClick(action, el, ctx) {
     }
     case 'adnco-show-finalize':
       openModal('Finalize ADNCO Roster',
-        `<p class="text-sm text-muted mb-3">This saves the ADNCO roster separately from main fire watch duty. Student ADNCO points will update.</p>
+        `<p class="text-sm text-muted mb-3">Saves only to ADNCO history — does not affect main Personnel or duty rosters.</p>
          <p class="text-sm text-amber">Verify phone numbers and assignments before confirming.</p>`,
         `<button class="btn btn-secondary" data-action="close-modal">Cancel</button>
          <button class="btn btn-primary" data-action="adnco-confirm-finalize">🔒 Confirm Finalize</button>`, 'sm');
       return true;
     case 'adnco-confirm-finalize': {
       if (!state.currentAdncoRoster) return true;
-      state.personnel = finalizeAdncoRoster(state.currentAdncoRoster, state.personnel);
+      state.adncoStudents = finalizeAdncoRoster(state.currentAdncoRoster, state.adncoStudents ?? []);
       const finalized = { ...state.currentAdncoRoster, finalized: true, finalizedAt: new Date().toISOString() };
       if (!state.adncoHistory) state.adncoHistory = [];
       const idx = state.adncoHistory.findIndex((h) => h.month === finalized.month && h.year === finalized.year);
@@ -265,18 +284,18 @@ export function handleAdncoClick(action, el, ctx) {
       state.currentAdncoRoster = finalized;
       closeModal();
       persist();
-      const printed = openAdncoPrintout(finalized, state.personnel, state.settings);
+      const printed = openAdncoPrintout(finalized, state.adncoStudents, state.settings);
       toast(printed ? 'ADNCO roster finalized — printout opened' : 'Finalized! Use Print button if pop-up blocked.');
       render();
       return true;
     }
     case 'adnco-print':
-      if (state.currentAdncoRoster) openAdncoPrintout(state.currentAdncoRoster, state.personnel, state.settings);
+      if (state.currentAdncoRoster) openAdncoPrintout(state.currentAdncoRoster, state.adncoStudents ?? [], state.settings);
       return true;
     case 'adnco-export-csv':
       if (state.currentAdncoRoster) {
         openCSVInNewTab(
-          exportAdncoCSV(state.currentAdncoRoster, state.personnel, state.settings),
+          exportAdncoCSV(state.currentAdncoRoster, state.adncoStudents ?? [], state.settings),
           `YouGotFireWatch-ADNCO-${ui.adncoYear}-${String(ui.adncoMonth).padStart(2, '0')}.csv`
         );
       }
@@ -315,7 +334,7 @@ export function handleAdncoChange(action, el, ctx) {
   }
   if (action === 'adnco-self-select') {
     ui.adncoSelfServiceId = el.value;
-    const p = state.personnel.find((x) => x.id === el.value);
+    const p = (state.adncoStudents ?? []).find((x) => x.id === el.value);
     ui.adncoNaDraft = p?.adncoNonAvailabilityInput ?? '';
     render();
     return true;
@@ -326,7 +345,7 @@ export function handleAdncoChange(action, el, ctx) {
     if (!state.currentAdncoRoster) return true;
     if (personId) {
       const v = validateAdncoAssignment(
-        personId, slotId, state.currentAdncoRoster, state.personnel, ui.adncoYear, ui.adncoMonth
+        personId, slotId, state.currentAdncoRoster, state.adncoStudents ?? [], ui.adncoYear, ui.adncoMonth
       );
       if (!v.valid) { alert(v.message); render(); return true; }
     }

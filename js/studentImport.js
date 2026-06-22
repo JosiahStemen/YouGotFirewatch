@@ -1,10 +1,10 @@
 /**
- * ADNCO student CSV import / template
+ * ADNCO student CSV import / export (separate from main personnel backup)
  */
 
 import { generateId } from './dateUtils.js';
-import { parseDayNumberInput } from './dayNumberAvailability.js';
-import { formatPersonName, normalizePerson } from './personnelUtils.js';
+import { parseDayNumberInput, formatDayNumberForDisplay } from './dayNumberAvailability.js';
+import { normalizeStudent, studentMatchKey } from './personnelUtils.js';
 
 function csvField(val) {
   if (val == null || val === '') return '';
@@ -35,7 +35,8 @@ function parseCSVLine(line) {
 
 export function getStudentImportTemplate() {
   return [
-    '# YouGotFireWatch ADNCO Student Import',
+    '# YouGotFireWatch ADNCO Student Roster',
+    '# Completely separate from main duty personnel backup',
     '# studentType must be Academic or MAT',
     '# nonAvailability: simple day numbers — 5, 12-14, 20',
     'rank,lastName,firstName,phoneNumber,studentType,points,lastDutyDate,nonAvailability',
@@ -43,6 +44,27 @@ export function getStudentImportTemplate() {
     'Cpl,Anderson,Sarah,831-555-0102,Academic,6,,"10-12, 18"',
     'PFC,Miller,James,831-555-0103,MAT,3,,5,20-22',
   ].join('\n');
+}
+
+export function exportAdncoStudentsCSV(students) {
+  const today = new Date().toISOString().split('T')[0];
+  const lines = [
+    '# YouGotFireWatch ADNCO Students',
+    'rank,lastName,firstName,phoneNumber,studentType,points,lastDutyDate,nonAvailability',
+  ];
+  for (const s of students) {
+    lines.push([
+      csvField(s.rank),
+      csvField(s.lastName),
+      csvField(s.firstName),
+      csvField(s.phoneNumber || ''),
+      csvField(s.studentType),
+      s.adncoPoints ?? 0,
+      csvField(s.lastAdncoDutyDate || ''),
+      csvField(formatDayNumberForDisplay(s.adncoNonAvailabilityInput || '')),
+    ].join(','));
+  }
+  return { content: lines.join('\n'), filename: `YouGotFireWatch-ADNCO-Students-${today}.csv` };
 }
 
 export function parseStudentImportCSV(text) {
@@ -86,21 +108,16 @@ export function parseStudentImportCSV(text) {
     const naRaw = row.nonavailability || row.non_availability || '';
     const na = parseDayNumberInput(naRaw);
 
-    students.push(normalizePerson({
+    students.push(normalizeStudent({
       id: generateId(),
       rank: row.rank.trim(),
       lastName: row.lastname.trim(),
       firstName: row.firstname.trim(),
-      name: formatPersonName(row.lastname.trim(), row.firstname.trim()),
       phoneNumber: row.phonenumber?.trim() || '',
       studentType,
-      points: parseFloat(row.points) || 0,
       adncoPoints: parseFloat(row.points) || 0,
-      lastDutyDate: row.lastdutydate?.trim() || null,
       lastAdncoDutyDate: row.lastdutydate?.trim() || null,
       adncoNonAvailabilityInput: na.normalized || '',
-      nonAvailabilityInput: '',
-      nonAvailability: [],
     }));
   }
 
@@ -111,16 +128,14 @@ export function parseStudentImportCSV(text) {
   return { students, errors, error: null };
 }
 
-/** Merge imported students into personnel (match by rank+lastName+firstName, else add). */
-export function mergeStudentsIntoPersonnel(personnel, students) {
-  const list = [...personnel];
-  for (const s of students) {
-    const key = `${s.rank}|${s.lastName}|${s.firstName}`.toLowerCase();
-    const idx = list.findIndex((p) =>
-      `${p.rank}|${p.lastName || ''}|${p.firstName || ''}`.toLowerCase() === key
-    );
+export function mergeStudentsIntoRoster(existing, imported, replaceAll = false) {
+  if (replaceAll) return imported.map(normalizeStudent);
+  const list = [...existing];
+  for (const s of imported) {
+    const key = studentMatchKey(s);
+    const idx = list.findIndex((x) => studentMatchKey(x) === key);
     if (idx >= 0) {
-      list[idx] = normalizePerson({ ...list[idx], ...s, id: list[idx].id });
+      list[idx] = normalizeStudent({ ...list[idx], ...s, id: list[idx].id });
     } else {
       list.push(s);
     }

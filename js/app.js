@@ -20,8 +20,6 @@ import {
 import {
   resolvePersonnelForMonth, parseNonAvailabilityColumn,
 } from './nonAvailability.js';
-import { normalizePersonnelList, displayName, formatPersonName } from './personnelUtils.js';
-import { DAY_NUMBER_PLACEHOLDER, DAY_NUMBER_HINT } from './dayNumberAvailability.js';
 import {
   renderAdncoTab, handleAdncoClick, handleAdncoChange, handleAdncoInput, createAdncoUiDefaults,
 } from './adncoTab.js';
@@ -34,6 +32,7 @@ let state = {
   history: [],
   currentAdncoRoster: null,
   adncoHistory: [],
+  adncoStudents: [],
   activeTab: 'personnel',
 };
 
@@ -58,12 +57,12 @@ function persist() { saveAppState(state); }
 function init() {
   const saved = loadAppState();
   if (saved) {
-    state = { ...state, ...saved, adncoHistory: saved.adncoHistory ?? [] };
+    state = { ...state, ...saved, adncoHistory: saved.adncoHistory ?? [], adncoStudents: saved.adncoStudents ?? [] };
   } else {
     state.personnel = createSamplePersonnel();
   }
-  state.personnel = normalizePersonnelList(state.personnel);
   if (!state.adncoHistory) state.adncoHistory = [];
+  if (!state.adncoStudents) state.adncoStudents = [];
   ui.settingsDraft = { ...state.settings, baselines: { ...state.settings.baselines } };
   ui.slots = createMonthSlots(ui.genYear, ui.genMonth, state.settings);
   render();
@@ -110,7 +109,7 @@ function renderBackupCard(context = 'generate') {
       <button class="btn btn-secondary btn-sm" data-action="backup-template">Download Template</button>
     </div>
     <p class="text-xs text-dim mb-2">${count} personnel loaded. Edit the backup CSV between months, then import before generating.</p>
-    <p class="text-xs text-dim"><strong>CSV columns:</strong> rank, lastName, firstName, phoneNumber, studentType, points, lastDutyDate, nonAvailability. Day numbers like <strong>5, 12-14</strong> work for ADNCO; <strong>1-7</strong> for main duty.</p>
+    <p class="text-xs text-dim"><strong>non_availability column:</strong> blank = available all month · <strong>all</strong> = no duty that month · <strong>1-7</strong> = unavailable the 1st–7th · <strong>1-7;20-25</strong> = multiple ranges. Values apply to whichever month you generate.</p>
     ${context === 'generate' ? '<p class="text-xs text-gold mt-2">After finalize, a printable roster opens in a new tab (print dialog + personnel CSV).</p>' : ''}
   </div>`;
 }
@@ -128,7 +127,7 @@ function importPersonnelBackup(text) {
     ? `Replace all ${state.personnel.length} current personnel with ${result.personnel.length} from this backup?`
     : `Load ${result.personnel.length} personnel from backup?`;
   if (!confirm(msg)) return false;
-  state.personnel = normalizePersonnelList(result.personnel);
+  state.personnel = result.personnel;
   persist();
   if (result.errors?.length) alert('Some rows were skipped:\n' + result.errors.join('\n'));
   toast(`Loaded ${result.personnel.length} personnel from backup`);
@@ -165,7 +164,7 @@ function render() {
     <nav class="tabs">
       ${['personnel','generate','adnco','history','settings'].map((t) =>
         `<button class="tab-btn ${state.activeTab === t ? 'active' : ''}" data-action="tab" data-tab="${t}">${
-          {personnel:'👥 Personnel',generate:'📅 Duty Roster',adnco:'🎓 ADNCO Students',history:'📋 History',settings:'⚙️ Settings'}[t]
+          {personnel:'👥 Personnel',generate:'📅 Generate Roster',adnco:'🎓 ADNCO Students',history:'📋 History',settings:'⚙️ Settings'}[t]
         }</button>`
       ).join('')}
     </nav>
@@ -205,15 +204,11 @@ function renderPersonnel() {
       <button class="btn btn-secondary" data-action="load-sample">Load Sample Data</button></div></div>`;
   }
 
-  const filtered = state.personnel.filter((p) => {
-    if (!ui.search) return true;
-    const q = ui.search.toLowerCase();
-    return displayName(p).toLowerCase().includes(q) ||
-      p.rank.toLowerCase().includes(q) ||
-      (p.section || '').toLowerCase().includes(q) ||
-      (p.phoneNumber || '').includes(q) ||
-      (p.studentType || '').toLowerCase().includes(q);
-  });
+  const filtered = state.personnel.filter((p) =>
+    !ui.search || p.name.toLowerCase().includes(ui.search.toLowerCase()) ||
+    p.rank.toLowerCase().includes(ui.search.toLowerCase()) ||
+    (p.section || '').toLowerCase().includes(ui.search.toLowerCase())
+  );
 
   return `
     <div class="flex flex-wrap justify-between items-center gap-4 mb-4">
@@ -238,18 +233,15 @@ function renderPersonnel() {
 function renderPersonCard(p) {
   return `<div class="card person-card">
     <div class="flex justify-between mb-3">
-      <div><span class="person-rank">${esc(p.rank)}</span><h3>${esc(displayName(p))}</h3>
-        ${p.studentType ? `<span class="badge-${p.studentType === 'MAT' ? 'mat' : 'academic'} student-type-badge">${esc(p.studentType)}</span>` : ''}
-        ${p.section ? `<span class="text-xs text-dim">${esc(p.section)}</span>` : ''}</div>
+      <div><span class="person-rank">${esc(p.rank)}</span><h3>${esc(p.name)}</h3>${p.section ? `<span class="text-xs text-dim">${esc(p.section)}</span>` : ''}</div>
       <div class="flex gap-2">
         <button class="btn btn-secondary btn-sm" data-action="edit-person" data-id="${p.id}">Edit</button>
         <button class="btn btn-danger btn-sm" data-action="delete-person" data-id="${p.id}">Del</button>
       </div>
     </div>
-    <div class="flex gap-4 text-sm flex-wrap">
+    <div class="flex gap-4 text-sm">
       <div><span class="text-dim">Points</span><div class="person-points">${p.points}</div></div>
       <div><span class="text-dim">Last Duty</span><div>${p.lastDutyDate ? formatShortDate(p.lastDutyDate) : 'Never'}</div></div>
-      ${p.phoneNumber ? `<div><span class="text-dim">Phone</span><div class="adnco-phone">${esc(p.phoneNumber)}</div></div>` : ''}
     </div>
     ${(() => { const na = personNALabel(p); return na ? `<div class="na-badge">⚠ ${esc(na)}${(p.nonAvailabilityInput ?? '').trim() ? ` <span class="text-dim">(applies when generating ${formatMonthYear(ui.genMonth, ui.genYear)})</span>` : ''}</div>` : ''; })()}
     ${p.notes ? `<p class="text-xs text-dim mt-2" style="font-style:italic">${esc(p.notes)}</p>` : ''}
@@ -259,33 +251,19 @@ function renderPersonCard(p) {
 function renderPersonForm() {
   const p = ui.editingPerson;
   const naVal = p?.nonAvailabilityInput ?? '';
-  const adncoNa = p?.adncoNonAvailabilityInput ?? '';
   return `<form class="card mb-4" data-action="save-person">
     <h3 class="mb-4 font-semibold">${p ? 'Edit' : 'Add'} Person</h3>
     <div class="grid-4 gap-3 mb-3">
       <div><label class="label">Rank</label><input class="input" name="rank" value="${esc(p?.rank)}" required></div>
-      <div><label class="label">Last Name</label><input class="input" name="lastName" value="${esc(p?.lastName)}" required></div>
-      <div><label class="label">First Name</label><input class="input" name="firstName" value="${esc(p?.firstName)}" required></div>
-      <div><label class="label">Phone</label><input class="input" name="phoneNumber" type="tel" value="${esc(p?.phoneNumber)}" placeholder="831-555-0100"></div>
-      <div><label class="label">Student Type (ADNCO)</label>
-        <select class="input" name="studentType">
-          <option value="">— Not a student —</option>
-          <option value="Academic" ${p?.studentType === 'Academic' ? 'selected' : ''}>Academic</option>
-          <option value="MAT" ${p?.studentType === 'MAT' ? 'selected' : ''}>MAT</option>
-        </select></div>
+      <div style="grid-column:span 2"><label class="label">Name</label><input class="input" name="name" value="${esc(p?.name)}" required></div>
       <div><label class="label">Points</label><input class="input" type="number" name="points" value="${p?.points ?? 0}" min="0"></div>
       <div><label class="label">Section</label><input class="input" name="section" value="${esc(p?.section)}"></div>
-      <div style="grid-column:span 2"><label class="label">Notes</label><input class="input" name="notes" value="${esc(p?.notes)}"></div>
+      <div style="grid-column:span 3"><label class="label">Notes</label><input class="input" name="notes" value="${esc(p?.notes)}"></div>
     </div>
     <div class="mb-3">
-      <label class="label">Non-Availability — Main Duty Roster</label>
+      <label class="label">Non-Availability (for roster month)</label>
       <input class="input" name="non_availability" value="${esc(naVal)}" placeholder="blank = available · all = no duty · 1-7 · 1-7;20-25">
-      <p class="hint">For main fire watch roster. Blank = available all month. <strong>all</strong> = skip duty entirely that month.</p>
-    </div>
-    <div class="mb-3">
-      <label class="label">Non-Availability — ADNCO (simple day numbers)</label>
-      <input class="input input-lg" name="adnco_non_availability" value="${esc(adncoNa)}" placeholder="${DAY_NUMBER_PLACEHOLDER}">
-      <p class="hint">${DAY_NUMBER_HINT}</p>
+      <p class="hint">Day-of-month ranges resolved when you generate. Blank = available all month. <strong>all</strong> = skip duty entirely that month.</p>
     </div>
     <div class="flex gap-3 justify-end">
       <button type="button" class="btn btn-secondary" data-action="cancel-person-form">Cancel</button>
@@ -569,7 +547,7 @@ function handleClick(e) {
     case 'print-history': { const r = state.history.find((h) => h.id === el.dataset.id); if (r) printRosterPDF(r, state.personnel, state.settings); break; }
     case 'save-settings': saveSettings(); break;
     case 'show-reset': showResetModal(); break;
-    case 'confirm-reset': clearAllData(); state = { personnel: createSamplePersonnel(), settings: { ...DEFAULT_SETTINGS }, currentRoster: null, history: [], currentAdncoRoster: null, adncoHistory: [], activeTab: 'settings' }; ui.settingsDraft = { ...state.settings, baselines: { ...state.settings.baselines } }; Object.assign(ui, createAdncoUiDefaults()); closeModal(); toast('Data reset'); render(); break;
+    case 'confirm-reset': clearAllData(); state = { personnel: createSamplePersonnel(), settings: { ...DEFAULT_SETTINGS }, currentRoster: null, history: [], currentAdncoRoster: null, adncoHistory: [], adncoStudents: [], activeTab: 'settings' }; ui.settingsDraft = { ...state.settings, baselines: { ...state.settings.baselines } }; Object.assign(ui, createAdncoUiDefaults()); closeModal(); toast('Data reset'); render(); break;
     case 'apply-bulk': applyBulk(); break;
     case 'save-day': saveDayEdit(); break;
   }
@@ -611,27 +589,16 @@ function handleSubmit(e) {
 function savePerson(form) {
   const fd = new FormData(form);
   const na = parseNonAvailabilityColumn(fd.get('non_availability') || '');
-  const adncoNa = parseNonAvailabilityColumn(fd.get('adnco_non_availability') || '');
-  const lastName = fd.get('lastName').trim();
-  const firstName = fd.get('firstName').trim();
-  const studentType = fd.get('studentType')?.trim();
   const person = {
     id: ui.editingPerson?.id || generateId(),
     rank: fd.get('rank').trim(),
-    lastName,
-    firstName,
-    name: formatPersonName(lastName, firstName),
-    phoneNumber: fd.get('phoneNumber')?.trim() || '',
-    studentType: studentType === 'Academic' || studentType === 'MAT' ? studentType : undefined,
+    name: fd.get('name').trim(),
     points: parseInt(fd.get('points'), 10) || 0,
-    adncoPoints: ui.editingPerson?.adncoPoints ?? (parseInt(fd.get('points'), 10) || 0),
     lastDutyDate: ui.editingPerson?.lastDutyDate || null,
-    lastAdncoDutyDate: ui.editingPerson?.lastAdncoDutyDate || null,
     section: fd.get('section')?.trim() || undefined,
     notes: fd.get('notes')?.trim() || undefined,
     nonAvailabilityInput: na.nonAvailabilityInput,
     nonAvailability: na.nonAvailability,
-    adncoNonAvailabilityInput: adncoNa.nonAvailabilityInput,
   };
   if (ui.editingPerson) {
     const idx = state.personnel.findIndex((p) => p.id === person.id);
@@ -797,9 +764,7 @@ function showHelpModal() {
      <div class="card" style="padding:1rem"><strong>✏ Calendar Editor</strong>
        <p class="text-sm text-muted mt-1">Adjust points per day for 96s, holidays, and unit events. Bulk tools apply changes across date ranges.</p></div>
      <div class="card mt-3" style="padding:1rem"><strong>📁 Monthly Backup Workflow</strong>
-       <p class="text-sm text-muted mt-1">After finalizing, export the personnel CSV. Before generating the next month, edit <strong>non_availability</strong> in that file: blank = available all month, <strong>all</strong> = no duty, <strong>1-7</strong> = unavailable the 1st–7th. Import the backup, then generate.</p></div>
-     <div class="card mt-3" style="padding:1rem"><strong>🎓 ADNCO Student Rosters</strong>
-       <p class="text-sm text-muted mt-1">Separate tab for Academic/MAT students. Use simple day numbers for availability (<strong>5, 12-14, 20</strong>). MAT = Sun 1630–Fri 1630; Academic = Fri 1630–Sun 1630.</p></div>`,
+       <p class="text-sm text-muted mt-1">After finalizing, export the personnel CSV. Before generating the next month, edit <strong>non_availability</strong> in that file: blank = available all month, <strong>all</strong> = no duty, <strong>1-7</strong> = unavailable the 1st–7th. Import the backup, then generate.</p></div>`,
     `<button class="btn btn-primary" data-action="close-modal" style="width:100%">Got It</button>`, 'lg');
 }
 

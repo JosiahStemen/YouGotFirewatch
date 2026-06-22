@@ -1,51 +1,21 @@
-/** Shared personnel name / display helpers */
+/** ADNCO student helpers only — main duty personnel uses `name` field unchanged. */
 
-export function formatPersonName(lastName, firstName) {
-  const ln = (lastName ?? '').trim();
-  const fn = (firstName ?? '').trim();
-  if (!ln && !fn) return '';
-  return fn ? `${ln}, ${fn}` : ln;
+export function normalizeStudent(student) {
+  const s = { ...student };
+  s.phoneNumber = s.phoneNumber ?? '';
+  s.adncoNonAvailabilityInput = s.adncoNonAvailabilityInput ?? '';
+  if (s.adncoPoints == null) s.adncoPoints = 0;
+  return s;
 }
 
-export function parseLegacyName(name) {
-  if (!name) return { lastName: '', firstName: '' };
-  const parts = String(name).split(',').map((s) => s.trim());
-  return { lastName: parts[0] || '', firstName: parts[1] || '' };
+export function normalizeStudentList(students) {
+  return (students ?? []).map(normalizeStudent);
 }
 
-export function normalizePerson(person) {
-  const p = { ...person };
-  if (!p.lastName && p.name) {
-    const parsed = parseLegacyName(p.name);
-    p.lastName = parsed.lastName;
-    p.firstName = parsed.firstName;
-  }
-  if (!p.name && p.lastName) {
-    p.name = formatPersonName(p.lastName, p.firstName);
-  }
-  p.phoneNumber = p.phoneNumber ?? '';
-  p.studentType = p.studentType === 'Academic' || p.studentType === 'MAT' ? p.studentType : (p.studentType || undefined);
-  p.adncoNonAvailabilityInput = p.adncoNonAvailabilityInput ?? '';
-  if (p.adncoPoints == null) p.adncoPoints = p.points ?? 0;
-  p.nonAvailability = p.nonAvailability ?? [];
-  return p;
+export function adncoDisplayName(s) {
+  return `${s.rank} ${s.lastName}, ${s.firstName}`;
 }
 
-export function normalizePersonnelList(personnel) {
-  return (personnel ?? []).map(normalizePerson);
-}
-
-export function displayName(p) {
-  if (p.lastName) return formatPersonName(p.lastName, p.firstName);
-  return p.name || '';
-}
-
-export function adncoDisplayName(p) {
-  const ln = p.lastName || parseLegacyName(p.name).lastName;
-  const fn = p.firstName || parseLegacyName(p.name).firstName;
-  return `${p.rank} ${ln}, ${fn}`;
-}
-
-export function getAdncoStudents(personnel) {
-  return personnel.filter((p) => p.studentType === 'Academic' || p.studentType === 'MAT');
+export function studentMatchKey(s) {
+  return `${s.rank}|${s.lastName}|${s.firstName}`.toLowerCase();
 }

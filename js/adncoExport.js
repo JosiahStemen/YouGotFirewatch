@@ -1,8 +1,8 @@
 import { formatMonthYear } from './dateUtils.js';
 import { adncoDisplayName } from './personnelUtils.js';
 
-export function exportAdncoCSV(roster, personnel, settings) {
-  const map = new Map(personnel.map((p) => [p.id, p]));
+export function exportAdncoCSV(roster, students, settings) {
+  const map = new Map((students ?? []).map((p) => [p.id, p]));
   const lines = [
     `# YouGotFireWatch ADNCO Student Roster — ${formatMonthYear(roster.month, roster.year)}`,
     `# ${settings?.unitName || ''}`,
@@ -25,8 +25,8 @@ export function exportAdncoCSV(roster, personnel, settings) {
   return lines.join('\n');
 }
 
-export function openAdncoPrintout(roster, personnel, settings) {
-  const map = new Map(personnel.map((p) => [p.id, p]));
+export function openAdncoPrintout(roster, students, settings) {
+  const map = new Map((students ?? []).map((p) => [p.id, p]));
   const sorted = [...roster.slots].sort((a, b) => a.startDate.localeCompare(b.startDate));
   const finalized = roster.finalized ? ' <span class="badge">FINALIZED</span>' : '';
 

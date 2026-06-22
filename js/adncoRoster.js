@@ -82,14 +82,14 @@ function compareCandidates(a, b) {
   return a.id.localeCompare(b.id);
 }
 
-export function generateAdncoRoster(year, month, personnel, existingRoster, keepManual) {
-  const students = personnel.filter((p) => p.studentType === 'Academic' || p.studentType === 'MAT');
+export function generateAdncoRoster(year, month, students, existingRoster, keepManual) {
+  students = (students ?? []).filter((p) => p.studentType === 'Academic' || p.studentType === 'MAT');
   const warnings = [];
 
   if (!students.length) {
     return {
       roster: null,
-      warnings: ['No students with studentType Academic or MAT. Add students in Personnel or import a student CSV.'],
+      warnings: ['No students with studentType Academic or MAT. Import a student CSV or load sample students in the ADNCO tab.'],
     };
   }
 
@@ -168,10 +168,10 @@ export function generateAdncoRoster(year, month, personnel, existingRoster, keep
   return { roster, warnings };
 }
 
-export function validateAdncoAssignment(personId, slotId, roster, personnel, year, month) {
+export function validateAdncoAssignment(personId, slotId, roster, students, year, month) {
   if (!personId) return { valid: true, message: '' };
   const slot = roster.slots.find((s) => s.id === slotId);
-  const person = personnel.find((p) => p.id === personId);
+  const person = (students ?? []).find((p) => p.id === personId);
   if (!slot || !person) return { valid: false, message: 'Invalid slot or person.' };
 
   if (person.studentType !== slot.eligibleType) {
@@ -194,8 +194,8 @@ export function validateAdncoAssignment(personId, slotId, roster, personnel, yea
   return { valid: true, message: '' };
 }
 
-export function finalizeAdncoRoster(roster, personnel) {
-  const updated = personnel.map((p) => ({ ...p }));
+export function finalizeAdncoRoster(roster, students) {
+  const updated = (students ?? []).map((p) => ({ ...p }));
   for (const slot of roster.slots) {
     if (!slot.personId) continue;
     const idx = updated.findIndex((p) => p.id === slot.personId);
@@ -207,10 +207,10 @@ export function finalizeAdncoRoster(roster, personnel) {
   return updated;
 }
 
-export function countAdncoStaffing(slots, personnel) {
+export function countAdncoStaffing(slots, students) {
   const matSlots = slots.filter((s) => s.eligibleType === 'MAT').length;
   const acSlots = slots.filter((s) => s.eligibleType === 'Academic').length;
-  const matStudents = personnel.filter((p) => p.studentType === 'MAT').length;
-  const acStudents = personnel.filter((p) => p.studentType === 'Academic').length;
+  const matStudents = (students ?? []).filter((p) => p.studentType === 'MAT').length;
+  const acStudents = (students ?? []).filter((p) => p.studentType === 'Academic').length;
   return { matSlots, acSlots, matStudents, acStudents };
 }
