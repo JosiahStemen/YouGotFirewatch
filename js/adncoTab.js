@@ -259,7 +259,7 @@ function renderAdncoBackupCard(ctx) {
     </div>
     <p class="text-xs text-dim mb-2">${count} student${count !== 1 ? 's' : ''} loaded. Edit the backup CSV between months, then import before generating.</p>
     <p class="text-xs text-dim"><strong>section:</strong> 1, 2, 3 (Academic), or MAT · <strong>nonAvailability:</strong> day numbers or <strong>all</strong> · <strong>driversLicense:</strong> Y for Duty Driver · DNCO requires <strong>LCpl</strong>.</p>
-    <p class="text-xs text-gold mt-2">After finalize, a formatted Excel roster downloads automatically (MAT rows blank for platoon) plus an updated student CSV.</p>
+    <p class="text-xs text-gold mt-2">After finalize, a .xlsx roster opens in a new tab (MAT rows blank) plus student CSV in another tab. Allow pop-ups.</p>
   </div>`;
 }
 
@@ -468,7 +468,7 @@ export function renderAdncoResults(ctx, rosterOverride) {
     <div class="flex justify-between items-center mb-3">
       <h3 class="font-semibold">ADNCO Roster — ${formatMonthYear(roster.month, roster.year)}</h3>
       <div class="flex gap-2 flex-wrap">
-        <button class="btn btn-secondary btn-sm" data-action="adnco-export-excel">📗 Download Excel</button>
+        <button class="btn btn-secondary btn-sm" data-action="adnco-export-excel">📗 Open Excel (.xlsx)</button>
         <button class="btn btn-secondary btn-sm" data-action="adnco-print">📄 Print</button>
         <button class="btn btn-secondary btn-sm" data-action="adnco-export-csv">📊 Export CSV</button>
       </div>
@@ -604,7 +604,7 @@ export function handleAdncoClick(action, el, ctx) {
     case 'adnco-show-finalize':
       openModal('Finalize ADNCO Roster',
         `<p class="text-sm text-muted mb-3">Saves to ADNCO history only — does not affect OOD personnel. Updates Academic student last-duty dates in memory.</p>
-         <p class="text-sm text-muted mb-3">A <strong>formatted Excel roster</strong> downloads automatically (MAT rows blank for platoon to fill in). An <strong>updated student CSV</strong> also opens — save that for next month&apos;s import.</p>
+         <p class="text-sm text-muted mb-3">A <strong>.xlsx roster</strong> opens in a <strong>new tab</strong> (MAT rows blank for platoon). Student CSV opens in another new tab — save that for next month&apos;s import. Allow pop-ups.</p>
          <p class="text-sm text-amber">Verify Academic assignments before confirming. MAT periods are intentionally left blank.</p>`,
         `<button class="btn btn-secondary" data-action="close-modal">Cancel</button>
          <button class="btn btn-primary" data-action="adnco-confirm-finalize">🔒 Confirm Finalize</button>`, 'sm');
@@ -617,17 +617,17 @@ export function handleAdncoClick(action, el, ctx) {
       state.currentAdncoRoster = finalized;
       closeModal();
       persist();
-      const studentExport = exportAdncoStudentsCSV(state.adncoStudents ?? []);
-      const csvOpened = openCSVInNewTab(studentExport.content, studentExport.filename);
-      downloadAdncoExcel(finalized, state.adncoStudents, state.settings).then((excelDownloaded) => {
-        if (excelDownloaded && csvOpened) {
-          toast('Finalized! .xlsx roster downloaded + student CSV opened.');
-        } else if (excelDownloaded) {
-          toast('Finalized! .xlsx downloaded. Allow pop-ups for student CSV too.');
+      downloadAdncoExcel(finalized, state.adncoStudents, state.settings).then((excelOpened) => {
+        const studentExport = exportAdncoStudentsCSV(state.adncoStudents ?? []);
+        const csvOpened = openCSVInNewTab(studentExport.content, studentExport.filename);
+        if (excelOpened && csvOpened) {
+          toast('Finalized! .xlsx + student CSV opened in new tabs.');
+        } else if (excelOpened) {
+          toast('Finalized! .xlsx opened in new tab. Allow pop-ups for student CSV.');
         } else if (csvOpened) {
-          toast('Student CSV opened. Use Download Excel if the .xlsx failed.');
+          toast('Student CSV opened. Use Download Excel if .xlsx tab was blocked.');
         } else {
-          toast('Finalized! Use Export buttons if downloads were blocked.');
+          toast('Finalized! Allow pop-ups, then use Export buttons.');
         }
         render();
       });
@@ -637,7 +637,7 @@ export function handleAdncoClick(action, el, ctx) {
       const roster = state.currentAdncoRoster ?? ui.viewingAdncoHistory;
       if (roster) {
         downloadAdncoExcel(roster, state.adncoStudents ?? [], state.settings).then((ok) => {
-          if (ok) toast('.xlsx roster downloaded');
+          if (ok) toast('.xlsx opened in new tab');
         });
       }
       return true;

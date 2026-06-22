@@ -2,26 +2,52 @@ import { formatMonthYear } from './dateUtils.js';
 import { groupAdncoSlotsByDay, ADNCO_POSITIONS } from './adncoRoster.js';
 
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-let xlsxLoadPromise = null;
 
-function loadXlsx() {
-  if (!xlsxLoadPromise) {
-    xlsxLoadPromise = import('./vendor/xlsx.js').then((mod) => mod.default ?? mod);
+function getXlsxLib() {
+  const lib = typeof globalThis !== 'undefined' ? globalThis.XLSX : null;
+  if (!lib?.utils?.book_new || !lib?.write) {
+    throw new Error('Excel library failed to load — hard refresh (Ctrl+F5) and try again.');
   }
-  return xlsxLoadPromise;
+  return lib;
 }
 
-function triggerBlobDownload(data, filename, mime) {
-  const blob = new Blob([data], { type: mime });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.style.display = 'none';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 5000);
+function isRealXlsx(bytes) {
+  return bytes?.byteLength > 4 && bytes[0] === 0x50 && bytes[1] === 0x4B && bytes[2] === 0x03 && bytes[3] === 0x04;
+}
+
+function openXlsxInNewTab(bytes, filename) {
+  const blob = new Blob([bytes], { type: XLSX_MIME });
+  const blobUrl = URL.createObjectURL(blob);
+  const win = window.open('', '_blank');
+  if (!win) {
+    alert('Pop-up blocked. Allow pop-ups for this site to open the Excel roster in a new tab.');
+    URL.revokeObjectURL(blobUrl);
+    return false;
+  }
+  const safeName = filename.replace(/[<>"']/g, '');
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${safeName}</title>
+<style>
+  body { font-family: Arial, system-ui, sans-serif; margin: 24px; color: #1a2332; max-width: 36rem; }
+  h1 { font-size: 1.1rem; margin-bottom: 6px; }
+  p { color: #4b5563; font-size: 0.875rem; line-height: 1.5; margin-bottom: 14px; }
+  a.dl { display: inline-block; padding: 10px 18px; background: #1a6b3c; color: #fff;
+    text-decoration: none; border-radius: 6px; font-weight: 600; margin-bottom: 12px; }
+  .hint { font-size: 0.8rem; color: #6b7280; }
+</style></head><body>
+<h1>${safeName}</h1>
+<p>Real Excel <strong>.xlsx</strong> file — open in Microsoft Excel. Academic rows are filled; <strong>MAT rows are blank</strong> for platoon to complete.</p>
+<a class="dl" id="dl" href="${blobUrl}" download="${safeName}">Download .xlsx</a>
+<p class="hint">If download did not start, click the button above. Close this tab to return to YouGotFireWatch.</p>
+<script>
+  window.addEventListener('load', function() {
+    var link = document.getElementById('dl');
+    if (link) link.click();
+  });
+</script>
+</body></html>`);
+  win.document.close();
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 120000);
+  return true;
 }
 
 function personCell(p) {
@@ -79,6 +105,14 @@ function buildAdncoWorkbook(XLSX, roster, students, settings) {
   return wb;
 }
 
+function buildAdncoXlsxBytes(roster, students, settings) {
+  const XLSX = getXlsxLib();
+  const wb = buildAdncoWorkbook(XLSX, roster, students, settings);
+  const bytes = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  if (!isRealXlsx(bytes)) throw new Error('Generated file is not a valid .xlsx workbook');
+  return bytes;
+}
+
 export function exportAdncoCSV(roster, students, settings) {
   const map = new Map((students ?? []).map((p) => [p.id, p]));
   const headers = ['date_time_window', 'eligible_type', ...ADNCO_POSITIONS.map((p) => p.position)];
@@ -102,23 +136,17 @@ export function exportAdncoCSV(roster, students, settings) {
   return lines.join('\n');
 }
 
-/** Download a real .xlsx workbook (Office Open XML) for MAT platoon to complete manually. */
+/** Open real .xlsx in a new tab (main app tab stays put). */
 export function downloadAdncoExcel(roster, students, settings) {
   const filename = `YouGotFireWatch-ADNCO-${roster.year}-${String(roster.month).padStart(2, '0')}.xlsx`;
-
-  return loadXlsx()
-    .then((XLSX) => {
-      const wb = buildAdncoWorkbook(XLSX, roster, students, settings);
-      const bytes = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-      if (!bytes?.byteLength) throw new Error('Excel file was empty');
-      triggerBlobDownload(bytes, filename, XLSX_MIME);
-      return true;
-    })
-    .catch((err) => {
-      console.error('ADNCO Excel export failed:', err);
-      alert(`Could not create Excel file: ${err.message}\n\nTry a hard refresh (Ctrl+F5), then finalize again.`);
-      return false;
-    });
+  try {
+    const bytes = buildAdncoXlsxBytes(roster, students, settings);
+    return Promise.resolve(openXlsxInNewTab(bytes, filename));
+  } catch (err) {
+    console.error('ADNCO Excel export failed:', err);
+    alert(`Could not create Excel file: ${err.message}`);
+    return Promise.resolve(false);
+  }
 }
 
 export function openAdncoPrintout(roster, students, settings) {
