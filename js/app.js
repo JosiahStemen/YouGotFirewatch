@@ -21,11 +21,13 @@ import {
   resolvePersonnelForMonth, parseNonAvailabilityColumn,
 } from './nonAvailability.js';
 import {
-  renderAdncoTab, handleAdncoClick, handleAdncoChange, createAdncoUiDefaults, initAdncoSlots,
+  renderAdncoTab, renderAdncoResults, handleAdncoClick, handleAdncoChange,
+  createAdncoUiDefaults, initAdncoSlots,
 } from './adncoTab.js';
+import { groupAdncoSlotsByDay } from './adncoRoster.js';
 import { normalizeStudentList } from './personnelUtils.js';
 
-export const APP_VERSION = '2026.06.25';
+export const APP_VERSION = '2026.06.26';
 
 // ─── State ───────────────────────────────────────────────────────────────────
 let state = {
@@ -447,32 +449,81 @@ function renderSupernumeraries(roster, readOnly) {
 }
 
 // ─── History Tab ─────────────────────────────────────────────────────────────
-function renderHistory() {
-  if (ui.viewingHistory) {
-    return `<button class="btn btn-secondary btn-sm mb-4" data-action="back-history">← Back</button>
-      ${renderRosterResults(ui.viewingHistory, true)}`;
-  }
-  const sorted = [...state.history].sort((a, b) => b.year - a.year || b.month - a.month);
-  if (!sorted.length) {
-    return `<div class="empty-state"><div class="empty-icon">📋</div><h3>No Roster History</h3>
-      <p>Finalized rosters will appear here.</p></div>`;
-  }
-  return `<div class="mb-4"><h2 style="font-size:1.25rem;font-weight:600">Roster History</h2>
-    <p class="text-sm text-muted">${sorted.length} finalized roster${sorted.length!==1?'s':''}</p></div>
-    <div class="grid-3">${sorted.map((r) => {
-      const assigned = r.slots.filter((s) => s.personId).length;
-      const supers = r.supernumeraries.filter((s) => s.personId).length;
-      return `<div class="card"><div class="flex justify-between mb-3">
-        <h3 class="font-semibold">${formatMonthYear(r.month, r.year)}</h3><span class="text-xs text-olive">Finalized</span></div>
+function renderHistoryCard(entry) {
+  if (entry.kind === 'ood') {
+    const r = entry.roster;
+    const assigned = r.slots.filter((s) => s.personId).length;
+    const supers = r.supernumeraries.filter((s) => s.personId).length;
+    const status = r.finalized ? '<span class="text-xs text-olive">OOD · Finalized</span>'
+      : '<span class="text-xs text-amber">OOD · Generated</span>';
+    const dateLine = r.finalizedAt
+      ? `<p class="text-xs text-dim mb-3">Finalized ${new Date(r.finalizedAt).toLocaleDateString()}</p>` : '';
+    return `<div class="card"><div class="flex justify-between mb-3">
+        <h3 class="font-semibold">${formatMonthYear(r.month, r.year)}</h3>${status}</div>
         <div class="grid-3 text-sm mb-3"><div><span class="text-dim text-xs">Days</span><p class="font-mono">${assigned}/${r.slots.length}</p></div>
           <div><span class="text-dim text-xs">Supers</span><p class="font-mono">${supers}/2</p></div>
-          <div><span class="text-dim text-xs">Total Pts</span><p class="font-mono">${r.slots.reduce((s,x)=>s+x.points,0)}</p></div></div>
-        ${r.finalizedAt ? `<p class="text-xs text-dim mb-3">Finalized ${new Date(r.finalizedAt).toLocaleDateString()}</p>` : ''}
+          <div><span class="text-dim text-xs">Total Pts</span><p class="font-mono">${r.slots.reduce((s, x) => s + x.points, 0)}</p></div></div>
+        ${dateLine}
         <div class="flex gap-2">
           <button class="btn btn-secondary btn-sm" style="flex:1" data-action="view-history" data-id="${r.id}">View</button>
           <button class="btn btn-secondary btn-sm" data-action="print-history" data-id="${r.id}">📄</button>
         </div></div>`;
-    }).join('')}</div>`;
+  }
+
+  const r = entry.roster;
+  const periods = groupAdncoSlotsByDay(r.slots).length;
+  const assigned = r.slots.filter((s) => s.personId).length;
+  const status = r.finalized ? '<span class="text-xs text-olive">ADNCO · Finalized</span>'
+    : '<span class="text-xs text-amber">ADNCO · Generated</span>';
+  const dateLine = r.finalizedAt
+    ? `<p class="text-xs text-dim mb-3">Finalized ${new Date(r.finalizedAt).toLocaleDateString()}</p>`
+    : '<p class="text-xs text-dim mb-3">Generated — not yet finalized</p>';
+  return `<div class="card"><div class="flex justify-between mb-3">
+      <h3 class="font-semibold">${formatMonthYear(r.month, r.year)}</h3>${status}</div>
+      <div class="grid-3 text-sm mb-3"><div><span class="text-dim text-xs">Periods</span><p class="font-mono">${periods}</p></div>
+        <div><span class="text-dim text-xs">Positions</span><p class="font-mono">${assigned}/${r.slots.length}</p></div>
+        <div><span class="text-dim text-xs">Students</span><p class="font-mono">${state.adncoStudents.length}</p></div></div>
+      ${dateLine}
+      <div class="flex gap-2">
+        <button class="btn btn-secondary btn-sm" style="flex:1" data-action="view-adnco-history" data-id="${r.id}">View</button>
+        <button class="btn btn-secondary btn-sm" data-action="print-adnco-history" data-id="${r.id}">📄</button>
+      </div></div>`;
+}
+
+function renderHistory() {
+  if (ui.viewingAdncoHistory) {
+    const r = ui.viewingAdncoHistory;
+    return `<div class="flex flex-wrap gap-2 mb-4">
+        <button class="btn btn-secondary btn-sm" data-action="back-history">← Back</button>
+        ${!r.finalized ? `<button class="btn btn-primary btn-sm" data-action="open-adnco-from-history" data-id="${r.id}">✏ Edit in ADNCO Tab</button>` : ''}
+      </div>
+      ${renderAdncoResults(adncoCtx(), r)}`;
+  }
+  if (ui.viewingHistory) {
+    return `<button class="btn btn-secondary btn-sm mb-4" data-action="back-history">← Back</button>
+      ${renderRosterResults(ui.viewingHistory, true)}`;
+  }
+
+  const entries = [
+    ...state.history.map((r) => ({ kind: 'ood', roster: r, year: r.year, month: r.month })),
+    ...(state.adncoHistory ?? []).map((r) => ({ kind: 'adnco', roster: r, year: r.year, month: r.month })),
+  ].sort((a, b) => b.year - a.year || b.month - a.month);
+
+  if (!entries.length) {
+    return `<div class="empty-state"><div class="empty-icon">📋</div><h3>No Roster History</h3>
+      <p>Generated and finalized OOD and ADNCO rosters will appear here.</p></div>`;
+  }
+
+  const oodCount = state.history.length;
+  const adncoCount = state.adncoHistory?.length ?? 0;
+  const summary = [
+    oodCount ? `${oodCount} OOD` : '',
+    adncoCount ? `${adncoCount} ADNCO` : '',
+  ].filter(Boolean).join(' · ');
+
+  return `<div class="mb-4"><h2 style="font-size:1.25rem;font-weight:600">Roster History</h2>
+    <p class="text-sm text-muted">${entries.length} roster${entries.length !== 1 ? 's' : ''}${summary ? ` (${summary})` : ''}</p></div>
+    <div class="grid-3">${entries.map(renderHistoryCard).join('')}</div>`;
 }
 
 // ─── Settings Tab ────────────────────────────────────────────────────────────
@@ -551,8 +602,12 @@ function handleClick(e) {
     case 'confirm-finalize': doFinalize(); break;
     case 'export-pdf': if (state.currentRoster) printRosterPDF(state.currentRoster, state.personnel, state.settings); break;
     case 'export-csv': if (state.currentRoster) openCSVInNewTab(exportRosterCSV(state.currentRoster, state.personnel, state.settings), `YouGotFireWatch-Detail-${ui.genYear}-${String(ui.genMonth).padStart(2,'0')}.csv`); break;
-    case 'back-history': ui.viewingHistory = null; render(); break;
-    case 'view-history': ui.viewingHistory = state.history.find((h) => h.id === el.dataset.id); render(); break;
+    case 'back-history': ui.viewingHistory = null; ui.viewingAdncoHistory = null; render(); break;
+    case 'view-history':
+      ui.viewingHistory = state.history.find((h) => h.id === el.dataset.id);
+      ui.viewingAdncoHistory = null;
+      render();
+      break;
     case 'print-history': { const r = state.history.find((h) => h.id === el.dataset.id); if (r) printRosterPDF(r, state.personnel, state.settings); break; }
     case 'save-settings': saveSettings(); break;
     case 'show-reset': showResetModal(); break;

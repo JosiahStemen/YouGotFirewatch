@@ -20,6 +20,14 @@ import { DAY_NUMBER_HINT } from './dayNumberAvailability.js';
 import { adncoDisplayName } from './personnelUtils.js';
 import { openCSVInNewTab } from './export.js';
 
+export function upsertAdncoHistory(state, roster) {
+  if (!state.adncoHistory) state.adncoHistory = [];
+  const idx = state.adncoHistory.findIndex((h) => h.month === roster.month && h.year === roster.year);
+  const entry = { ...roster };
+  if (idx >= 0) state.adncoHistory[idx] = entry;
+  else state.adncoHistory.push(entry);
+}
+
 export function createAdncoUiDefaults() {
   const now = new Date();
   return {
@@ -236,16 +244,18 @@ export function renderAdncoTab(ctx) {
   }
 
   if (state.adncoHistory?.length) {
-    html += renderAdncoHistoryList(ctx);
+    html += `<p class="text-center text-sm text-muted mt-4">📋 ${state.adncoHistory.length} ADNCO roster${state.adncoHistory.length !== 1 ? 's' : ''} saved — view in the <strong>History</strong> tab.</p>`;
   }
 
   return html;
 }
 
-function renderAdncoMonthCalendar(ctx, slots, interactive) {
+function renderAdncoMonthCalendar(ctx, slots, interactive, yearOverride, monthOverride) {
   const { ui, esc } = ctx;
-  const calDays = groupAdncoCalendarDays(slots, ui.adncoYear, ui.adncoMonth);
-  const offset = getCalendarGridOffset(ui.adncoYear, ui.adncoMonth);
+  const year = yearOverride ?? ui.adncoYear;
+  const month = monthOverride ?? ui.adncoMonth;
+  const calDays = groupAdncoCalendarDays(slots, year, month);
+  const offset = getCalendarGridOffset(year, month);
   const cells = [...Array(offset).fill(null), ...calDays];
   while (cells.length % 7) cells.push(null);
 
@@ -309,9 +319,10 @@ function renderAdminWorkflow(ctx) {
   </div>`;
 }
 
-function renderAdncoResults(ctx) {
+export function renderAdncoResults(ctx, rosterOverride) {
   const { state, esc } = ctx;
-  const roster = state.currentAdncoRoster;
+  const roster = rosterOverride ?? state.currentAdncoRoster;
+  if (!roster) return '';
   const map = new Map((state.adncoStudents ?? []).map((p) => [p.id, p]));
   const readOnly = roster.finalized;
   const students = state.adncoStudents ?? [];
@@ -339,28 +350,13 @@ function renderAdncoResults(ctx) {
       </div>
     </div>
     <div class="card mb-4"><h4 class="text-sm font-semibold text-muted mb-3">Visual Calendar — click a day to review positions</h4>
-      ${renderAdncoMonthCalendar(ctx, roster.slots, !readOnly)}</div>
+      ${renderAdncoMonthCalendar(ctx, roster.slots, !readOnly, roster.year, roster.month)}</div>
     <div class="card"><div class="table-wrap"><table class="data adnco-table adnco-wide-table">
       <thead><tr>
         <th>Date &amp; Time</th><th>Type</th>${posHeaders}
       </tr></thead>
       <tbody>${rows}</tbody>
     </table></div></div>`;
-}
-
-function renderAdncoHistoryList(ctx) {
-  const { state, esc } = ctx;
-  const sorted = [...state.adncoHistory].sort((a, b) => b.year - a.year || b.month - a.month);
-  return `<div class="card mt-4"><h4 class="text-sm font-semibold text-muted mb-3">Past ADNCO Rosters</h4>
-    <div class="grid-3">${sorted.map((r) => {
-      const filled = r.slots.filter((s) => s.personId).length;
-      return `<div class="card" style="padding:0.75rem">
-        <div class="flex justify-between mb-2"><span class="font-semibold">${formatMonthYear(r.month, r.year)}</span>
-          <span class="text-xs text-olive">Finalized</span></div>
-        <p class="text-xs text-dim">${filled}/${r.slots.length} positions filled</p>
-        <button class="btn btn-secondary btn-sm mt-2" style="width:100%" data-action="adnco-view-history" data-id="${r.id}">View</button>
-      </div>`;
-    }).join('')}</div></div>`;
 }
 
 export function handleAdncoClick(action, el, ctx) {
@@ -388,6 +384,7 @@ export function handleAdncoClick(action, el, ctx) {
       ui.adncoSlots = result.roster.slots;
       ui.adncoWarnings = result.warnings;
       ui.adncoGenerated = true;
+      upsertAdncoHistory(state, result.roster);
       persist();
       render();
       return true;
@@ -459,10 +456,7 @@ export function handleAdncoClick(action, el, ctx) {
       if (!state.currentAdncoRoster) return true;
       state.adncoStudents = finalizeAdncoRoster(state.currentAdncoRoster, state.adncoStudents ?? []);
       const finalized = { ...state.currentAdncoRoster, finalized: true, finalizedAt: new Date().toISOString() };
-      if (!state.adncoHistory) state.adncoHistory = [];
-      const idx = state.adncoHistory.findIndex((h) => h.month === finalized.month && h.year === finalized.year);
-      if (idx >= 0) state.adncoHistory[idx] = finalized;
-      else state.adncoHistory.push(finalized);
+      upsertAdncoHistory(state, finalized);
       state.currentAdncoRoster = finalized;
       closeModal();
       persist();
@@ -481,28 +475,50 @@ export function handleAdncoClick(action, el, ctx) {
       render();
       return true;
     }
-    case 'adnco-print':
-      if (state.currentAdncoRoster) openAdncoPrintout(state.currentAdncoRoster, state.adncoStudents ?? [], state.settings);
+    case 'adnco-print': {
+      const roster = state.currentAdncoRoster ?? ui.viewingAdncoHistory;
+      if (roster) openAdncoPrintout(roster, state.adncoStudents ?? [], state.settings);
       return true;
-    case 'adnco-export-csv':
-      if (state.currentAdncoRoster) {
+    }
+    case 'adnco-export-csv': {
+      const roster = state.currentAdncoRoster ?? ui.viewingAdncoHistory;
+      if (roster) {
         openCSVInNewTab(
-          exportAdncoCSV(state.currentAdncoRoster, state.adncoStudents ?? [], state.settings),
-          `YouGotFireWatch-ADNCO-${ui.adncoYear}-${String(ui.adncoMonth).padStart(2, '0')}.csv`
+          exportAdncoCSV(roster, state.adncoStudents ?? [], state.settings),
+          `YouGotFireWatch-ADNCO-${roster.year}-${String(roster.month).padStart(2, '0')}.csv`
         );
       }
       return true;
-    case 'adnco-view-history': {
+    }
+    case 'adnco-view-history':
+    case 'view-adnco-history': {
       const r = state.adncoHistory?.find((h) => h.id === el.dataset.id);
       if (r) {
+        state.activeTab = 'history';
         ui.viewingAdncoHistory = r;
+        ui.viewingHistory = null;
+        render();
+      }
+      return true;
+    }
+    case 'open-adnco-from-history': {
+      const r = state.adncoHistory?.find((h) => h.id === el.dataset.id)
+        ?? (ui.viewingAdncoHistory?.id === el.dataset.id ? ui.viewingAdncoHistory : null);
+      if (r) {
+        state.activeTab = 'adnco';
         state.currentAdncoRoster = r;
         ui.adncoSlots = createAdncoSlots(r.year, r.month, r.slots);
         ui.adncoGenerated = true;
         ui.adncoYear = r.year;
         ui.adncoMonth = r.month;
+        ui.viewingAdncoHistory = null;
         render();
       }
+      return true;
+    }
+    case 'print-adnco-history': {
+      const r = state.adncoHistory?.find((h) => h.id === el.dataset.id);
+      if (r) openAdncoPrintout(r, state.adncoStudents ?? [], state.settings);
       return true;
     }
     default:
