@@ -21,7 +21,7 @@ import {
   resolvePersonnelForMonth, parseNonAvailabilityColumn,
 } from './nonAvailability.js';
 import {
-  renderAdncoTab, handleAdncoClick, handleAdncoChange, createAdncoUiDefaults,
+  renderAdncoTab, handleAdncoClick, handleAdncoChange, createAdncoUiDefaults, initAdncoSlots,
 } from './adncoTab.js';
 
 // ─── State ───────────────────────────────────────────────────────────────────
@@ -65,6 +65,7 @@ function init() {
   if (!state.adncoStudents) state.adncoStudents = [];
   ui.settingsDraft = { ...state.settings, baselines: { ...state.settings.baselines } };
   ui.slots = createMonthSlots(ui.genYear, ui.genMonth, state.settings);
+  initAdncoSlots({ state, ui });
   render();
 }
 

@@ -7,8 +7,9 @@
  */
 
 import {
-  getMonthDays, toISODate, parseDate, isDateInRange, generateId, formatShortDate,
+  getMonthDays, toISODate, parseDate, isDateInRange, generateId, formatShortDate, getDayType,
 } from './dateUtils.js';
+import { getUSFederalHolidays, isHoliday } from './holidays.js';
 import { parseDayNumberInput, resolveDayNumberRangesForMonth } from './dayNumberAvailability.js';
 
 export function getSlotEligibleType(startDateIso) {
@@ -25,8 +26,9 @@ export function formatSlotWindow(startDate, endDate) {
   return `${startLabel} 1630 → ${endLabel} 1630`;
 }
 
-export function createAdncoSlots(year, month, existingSlots) {
+export function createAdncoSlots(year, month, settings, existingSlots) {
   const days = getMonthDays(year, month);
+  const holidays = getUSFederalHolidays(year);
   const map = new Map((existingSlots || []).map((s) => [s.startDate, s]));
   return days.map((day) => {
     const startDate = toISODate(day);
@@ -37,6 +39,9 @@ export function createAdncoSlots(year, month, existingSlots) {
     end.setDate(end.getDate() + 1);
     const endDate = toISODate(end);
     const eligibleType = getSlotEligibleType(startDate);
+    const dayIsHoliday = isHoliday(startDate, holidays);
+    const dayType = getDayType(startDate, dayIsHoliday);
+    const points = settings?.baselines?.[dayType] ?? 1;
 
     return {
       id: generateId(),
@@ -45,8 +50,40 @@ export function createAdncoSlots(year, month, existingSlots) {
       timeLabel: formatSlotWindow(startDate, endDate),
       eligibleType,
       personId: null,
-      points: 1,
+      points,
+      note: dayIsHoliday ? 'Federal holiday' : undefined,
     };
+  });
+}
+
+export function resetAdncoSlotsToBaseline(slots, settings, year) {
+  const holidays = getUSFederalHolidays(year);
+  return slots.map((slot) => {
+    const dayIsHoliday = isHoliday(slot.startDate, holidays);
+    const dayType = getDayType(slot.startDate, dayIsHoliday);
+    return { ...slot, points: settings.baselines[dayType], note: undefined };
+  });
+}
+
+export function applyAdncoWeekendDefaults(slots, settings, year) {
+  const holidays = getUSFederalHolidays(year);
+  return slots.map((slot) => {
+    const dayIsHoliday = isHoliday(slot.startDate, holidays);
+    const dayType = getDayType(slot.startDate, dayIsHoliday);
+    return { ...slot, points: settings.baselines[dayType], note: dayIsHoliday ? 'Federal holiday' : slot.note };
+  });
+}
+
+export function applyAdncoBulkUpdate(slots, startDate, endDate, updates) {
+  return slots.map((slot) => {
+    if (slot.startDate >= startDate && slot.startDate <= endDate) {
+      return {
+        ...slot,
+        points: updates.points ?? slot.points,
+        note: updates.note ? (updates.appendNote && slot.note ? `${slot.note}; ${updates.note}` : updates.note) : slot.note,
+      };
+    }
+    return slot;
   });
 }
 
@@ -82,7 +119,7 @@ function compareCandidates(a, b) {
   return a.id.localeCompare(b.id);
 }
 
-export function generateAdncoRoster(year, month, students, existingRoster, keepManual) {
+export function generateAdncoRoster(year, month, students, settings, existingRoster, keepManual, editedSlots) {
   students = (students ?? []).filter((p) => p.studentType === 'Academic' || p.studentType === 'MAT');
   const warnings = [];
 
@@ -94,7 +131,9 @@ export function generateAdncoRoster(year, month, students, existingRoster, keepM
   }
 
   const resolved = resolveAdncoPersonnel(students, year, month);
-  let slots = createAdncoSlots(year, month, existingRoster?.slots);
+  let slots = editedSlots
+    ? editedSlots.map((s) => ({ ...s }))
+    : createAdncoSlots(year, month, settings, existingRoster?.slots);
 
   if (keepManual && existingRoster) {
     slots = slots.map((s) => {
@@ -118,7 +157,13 @@ export function generateAdncoRoster(year, month, students, existingRoster, keepM
     warnings.push(`${acSlots.length} Academic duty slot(s) but no Academic students on roster.`);
   }
 
-  const sorted = [...slots].sort((a, b) => a.startDate.localeCompare(b.startDate));
+  const sorted = [...slots]
+    .filter((s) => !s.personId)
+    .sort((a, b) => {
+      const ptsDiff = (b.points ?? 0) - (a.points ?? 0);
+      if (ptsDiff !== 0) return ptsDiff;
+      return a.startDate.localeCompare(b.startDate);
+    });
   const result = slots.map((s) => ({ ...s }));
 
   for (const slot of sorted) {
