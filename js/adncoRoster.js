@@ -100,7 +100,9 @@ export function inferLegacyPeriodId(startDateIso) {
 }
 
 export function getDefaultEligibleType(startDateIso, periodId) {
-  const period = getDutyPeriodsForDate(startDateIso).find((p) => p.periodId === periodId);
+  const periods = getDutyPeriodsForDate(startDateIso);
+  if (periodId === 'day' && periods.length > 1) return null;
+  const period = periods.find((p) => p.periodId === periodId);
   return period?.eligibleType ?? 'MAT';
 }
 
@@ -112,11 +114,78 @@ function resolvePeriodEligibleType(existing, defaultType) {
   };
 }
 
+/** Full-day 0630→0630 window when a split day (Fri/Sun) is unified to one student type. */
+export function standardDayPeriod(eligibleType, typeOverridden = true) {
+  return {
+    periodId: 'day',
+    eligibleType,
+    startTime: '0630',
+    endTime: '0630',
+    typeOverridden,
+  };
+}
+
+function collapseDayIfUniform(daySlots) {
+  const periodIds = [...new Set(daySlots.map((s) => s.periodId ?? inferLegacyPeriodId(s.startDate)))];
+  if (periodIds.length <= 1) return daySlots;
+
+  const types = [...new Set(daySlots.map((s) => s.eligibleType))];
+  if (types.length !== 1) return daySlots;
+
+  const startDate = daySlots[0].startDate;
+  const unifiedType = types[0];
+  const endDate = nextDayIso(startDate);
+  const timeLabel = formatDutyWindow(startDate, '0630', endDate, '0630');
+  const typeOverridden = daySlots.some((s) => s.typeOverridden) || getDutyPeriodsForDate(startDate).length > 1;
+
+  const collapsed = [];
+  for (const pos of ADNCO_POSITIONS) {
+    const sources = ['am', 'day', 'pm'].flatMap((pid) =>
+      daySlots.filter((s) =>
+        s.position === pos.position && (s.periodId ?? inferLegacyPeriodId(s.startDate)) === pid
+      )
+    );
+    const source = sources.find((s) => s.personId) ?? sources[0];
+    const noteSlot = sources.find((s) => s.note);
+    collapsed.push({
+      id: source?.id ?? generateId(),
+      startDate,
+      periodId: 'day',
+      startTime: '0630',
+      endDate,
+      endTime: '0630',
+      timeLabel,
+      eligibleType: unifiedType,
+      typeOverridden,
+      position: pos.position,
+      positionLabel: pos.label,
+      personId: source?.personId ?? null,
+      note: noteSlot?.note,
+    });
+  }
+  return collapsed;
+}
+
+/** When Fri/Sun split periods share one type (e.g. all Academic), merge into single 0630→0630 shift. */
+export function consolidateUniformDaySlots(slots) {
+  if (!slots?.length) return slots ?? [];
+  const byDate = new Map();
+  for (const s of slots) {
+    if (!byDate.has(s.startDate)) byDate.set(s.startDate, []);
+    byDate.get(s.startDate).push(s);
+  }
+  const out = [];
+  for (const startDate of [...byDate.keys()].sort()) {
+    out.push(...collapseDayIfUniform(byDate.get(startDate)));
+  }
+  return out;
+}
+
 /** Override MAT ↔ Academic for one duty period (e.g. 96 liberty). Clears assignments that no longer match. */
 export function applyPeriodEligibleType(slots, startDate, periodId, newType, students) {
   const defaultType = getDefaultEligibleType(startDate, periodId);
   const studentMap = new Map((students ?? []).map((p) => [p.id, p]));
-  return slots.map((s) => {
+  let updated = slots.map((s) => {
     const pid = s.periodId ?? inferLegacyPeriodId(s.startDate);
     if (s.startDate !== startDate || pid !== periodId) return s;
     let personId = s.personId;
@@ -131,6 +200,8 @@ export function applyPeriodEligibleType(slots, startDate, periodId, newType, stu
       personId,
     };
   });
+  updated = purgeInvalidSlotAssignments(updated, students);
+  return consolidateUniformDaySlots(updated);
 }
 
 function slotKey(startDate, periodId, position) {
@@ -227,7 +298,7 @@ export function createAdncoSlots(year, month, existingSlots) {
     }
   }
 
-  return slots;
+  return consolidateUniformDaySlots(slots);
 }
 
 /** One entry per duty period (Fri/Sun may have two per calendar date). */
@@ -304,18 +375,37 @@ function shuffle(arr) {
   return a;
 }
 
-function pickFairRandom(resolved, slot, assignedToday, assignmentCount) {
-  const pool = resolved.filter(
+/**
+ * Fair pick within MAT or Academic pool:
+ * 1) Fewest assignments this month (everyone stands once before anyone stands twice)
+ * 2) No lastAdncoDutyDate (never stood) before those who have
+ * 3) Oldest lastAdncoDutyDate among the rest
+ * 4) Random tie-break
+ */
+function pickFairRandom(resolved, slot, assignedInPeriod, assignmentCount) {
+  let pool = resolved.filter(
     (p) =>
       personEligibleForAdncoSlot(p, slot) &&
-      !assignedToday.has(p.id) &&
+      !assignedInPeriod.has(p.id) &&
       !slotBlockedByNA(p, slot)
   );
   if (!pool.length) return null;
 
-  const minCount = Math.min(...pool.map((p) => assignmentCount.get(p.id) || 0));
-  const fairest = pool.filter((p) => (assignmentCount.get(p.id) || 0) === minCount);
-  return shuffle(fairest)[0];
+  const minMonth = Math.min(...pool.map((p) => assignmentCount.get(p.id) || 0));
+  pool = pool.filter((p) => (assignmentCount.get(p.id) || 0) === minMonth);
+
+  pool.sort((a, b) => {
+    const aLast = a.lastAdncoDutyDate;
+    const bLast = b.lastAdncoDutyDate;
+    if (!aLast && !bLast) return 0;
+    if (!aLast) return -1;
+    if (!bLast) return 1;
+    return aLast.localeCompare(bLast);
+  });
+
+  const bestLast = pool[0].lastAdncoDutyDate ?? null;
+  const tier = pool.filter((p) => (p.lastAdncoDutyDate ?? null) === bestLast);
+  return shuffle(tier)[0];
 }
 
 export function generateAdncoRoster(year, month, students, existingRoster, keepManual, editedSlots) {
@@ -350,6 +440,7 @@ export function generateAdncoRoster(year, month, students, existingRoster, keepM
   }
 
   slots = purgeInvalidSlotAssignments(slots, students);
+  slots = consolidateUniformDaySlots(slots);
 
   const assignmentCount = new Map();
   for (const s of slots) {

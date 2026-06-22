@@ -100,7 +100,11 @@ function renderPeriodSection(period, students, map, readOnly, esc) {
           <option value="MAT" ${period.eligibleType === 'MAT' ? 'selected' : ''}>MAT</option>
           <option value="Academic" ${period.eligibleType === 'Academic' ? 'selected' : ''}>Academic</option>
         </select>
-        <p class="hint mb-0">${overridden ? `Overridden (default: ${defaultType})` : `Default: ${defaultType}`} · use for 96s, etc.</p>
+        <p class="hint mb-0">${defaultType == null
+          ? (period.periodId === 'day' && period.timeLabel?.includes('0630 →') && !period.timeLabel?.includes('1630')
+            ? 'Unified full day (0630→0630) — split periods merged'
+            : 'Custom type for this period')
+          : overridden ? `Overridden (default: ${defaultType})` : `Default: ${defaultType}`} · use for 96s, etc.</p>
       </div></div>`
       : `<p class="text-sm text-muted mb-2"><span class="${typeClass}">${period.eligibleType}</span>${overridden ? ' <span class="text-amber text-xs">(overridden)</span>' : ''} · 5 positions</p>`}
     ${!readOnly ? `<div class="mb-2"><label class="label">Period Note</label>
@@ -199,7 +203,8 @@ export function renderAdncoTab(ctx) {
         <div class="mb-1"><span class="badge-mat">MAT</span> Sun <strong>1630</strong>→Mon <strong>0630</strong>, Mon–Thu <strong>0630</strong>→next <strong>0630</strong>, Fri <strong>0630</strong>→<strong>1630</strong></div>
         <div><span class="badge-academic">Academic</span> Fri <strong>1630</strong>→Sat <strong>0630</strong>, Sat <strong>0630</strong>→Sun <strong>0630</strong>, Sun <strong>0630</strong>→<strong>1630</strong></div>
       </div>
-      <p class="text-xs text-dim mt-2">Duty changes at <strong>0630</strong> (Fri &amp; Sun end at <strong>1630</strong>). Fri &amp; Sun each have <strong>two duty periods</strong>. Click a calendar day to override <strong>MAT ↔ Academic</strong> for 96s or other exceptions.</p>
+      <p class="text-xs text-dim mt-2">Duty changes at <strong>0630</strong> (Fri &amp; Sun split end at <strong>1630</strong> unless the whole day is one type — then <strong>0630→0630</strong>). Fair rotation: never-stood first, then oldest last duty; everyone in a pool stands once this month before anyone stands twice.</p>
+      <p class="text-xs text-muted mt-1">Click a calendar day to override <strong>MAT ↔ Academic</strong>. When both Fri/Sun periods match, they merge into one full shift.</p>
       <p class="text-xs text-muted mt-1">Staffing: ${staffing.matStudents} MAT students / ${staffing.matPositions} MAT positions (${staffing.matNights} periods × ${staffing.positionsPerPeriod}) · ${staffing.acStudents} Academic / ${staffing.acPositions} Academic positions (${staffing.acNights} periods)</p>
     </div>
 
