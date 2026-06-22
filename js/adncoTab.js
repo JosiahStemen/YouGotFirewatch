@@ -11,7 +11,7 @@ import {
   applyPeriodEligibleType, getDefaultEligibleType,
   purgeInvalidSlotAssignments, isAdncoUnavailableAllMonth, getAdncoNonAvailabilityInput,
 } from './adncoRoster.js';
-import { exportAdncoCSV, openAdncoPrintout } from './adncoExport.js';
+import { exportAdncoCSV, openAdncoPrintout, downloadAdncoExcel } from './adncoExport.js';
 import {
   getStudentImportTemplate, parseStudentImportCSV, mergeStudentsIntoRoster,
   exportAdncoStudentsCSV,
@@ -254,7 +254,7 @@ function renderAdncoBackupCard(ctx) {
     </div>
     <p class="text-xs text-dim mb-2">${count} student${count !== 1 ? 's' : ''} loaded. Edit the backup CSV between months, then import before generating.</p>
     <p class="text-xs text-dim"><strong>nonAvailability:</strong> day numbers for the roster month, or <strong>all</strong> for no duty that month · <strong>driversLicense:</strong> Y = eligible for Duty Driver · Bldg 827 (DNCO) always requires an <strong>LCpl</strong>.</p>
-    <p class="text-xs text-gold mt-2">After finalize, a printable ADNCO roster and updated student CSV open in new tabs.</p>
+    <p class="text-xs text-gold mt-2">After finalize, a formatted Excel roster downloads automatically (MAT rows blank for platoon) plus an updated student CSV.</p>
   </div>`;
 }
 
@@ -323,7 +323,7 @@ export function renderAdncoTab(ctx) {
         <div class="mb-1"><span class="badge-mat">MAT</span> Sun <strong>1630</strong>→Mon <strong>0630</strong>, Mon–Thu <strong>0630</strong>→next <strong>0630</strong>, Fri <strong>0630</strong>→<strong>1630</strong></div>
         <div><span class="badge-academic">Academic</span> Fri <strong>1630</strong>→Sat <strong>0630</strong>, Sat <strong>0630</strong>→Sun <strong>0630</strong>, Sun <strong>0630</strong>→<strong>1630</strong></div>
       </div>
-      <p class="text-xs text-dim mt-2">Duty changes at <strong>0630</strong> (Fri &amp; Sun split end at <strong>1630</strong> unless the whole day is one type — then <strong>0630→0630</strong>). Fair rotation: never-stood first, then oldest last duty; everyone in a pool stands once this month before anyone stands twice.</p>
+      <p class="text-xs text-dim mt-2">Duty changes at <strong>0630</strong> (Fri &amp; Sun split end at <strong>1630</strong> unless the whole day is one type — then <strong>0630→0630</strong>). <strong>Generate assigns Academic periods only</strong> — MAT platoon fills MAT rows in the Excel file after finalize.</p>
       <p class="text-xs text-muted mt-1">Click a calendar day to override <strong>MAT ↔ Academic</strong>. When both Fri/Sun periods match, they merge into one full shift.</p>
       <p class="text-xs text-muted mt-1">Staffing: ${staffing.matStudents} MAT students / ${staffing.matPositions} MAT positions (${staffing.matNights} periods × ${staffing.positionsPerPeriod}) · ${staffing.acStudents} Academic / ${staffing.acPositions} Academic positions (${staffing.acNights} periods)</p>
     </div>
@@ -340,7 +340,7 @@ export function renderAdncoTab(ctx) {
     html += `<div class="card mb-4"><h3 class="mb-4 font-semibold">Calendar Editor — ${formatMonthYear(ui.adncoMonth, ui.adncoYear)}</h3>
       <p class="text-sm text-muted mb-3">Click any day to add notes or pre-assign positions before generating — same workflow as the OOD calendar.</p>
       ${renderAdncoMonthCalendar(ctx, slotSource, true)}</div>
-      <div class="info-box mb-4">🎲 <strong>Generate</strong> fills every open position randomly. Students who have not yet been assigned this month are preferred. Re-generate to shuffle (check <em>Keep manual assignments</em> to lock edits).</div>
+      <div class="info-box mb-4">🎲 <strong>Generate</strong> auto-fills <strong>Academic</strong> periods only (fair rotation). <strong>MAT</strong> periods stay blank for the platoon to complete in Excel after finalize. Re-generate to reshuffle Academic (check <em>Keep manual assignments</em> to lock edits).</div>
       <div class="text-center mt-4">
         <button class="btn btn-primary btn-lg" data-action="adnco-generate">⚡ Generate ADNCOs</button>
       </div>`;
@@ -429,7 +429,8 @@ function renderAdminWorkflow(ctx) {
       <li>Edit CSV: update <strong>nonAvailability</strong>, add/remove students, set <strong>driversLicense</strong> (Y/N)</li>
       <li><strong>Import Backup</strong> to load the updated file into the calendar</li>
       <li>Review calendar — click days to pre-assign or add notes</li>
-      <li><strong>Generate ADNCOs</strong> → verify roster → <strong>Finalize</strong></li>
+      <li><strong>Generate ADNCOs</strong> (Academic auto-filled) → verify → <strong>Finalize</strong></li>
+      <li>Excel roster downloads — send to MAT platoon to fill yellow MAT rows</li>
       <li>Save the new student CSV export for next month</li>
     </ol>
     <p class="hint mb-0">${DAY_NUMBER_HINT}</p>
@@ -461,9 +462,10 @@ export function renderAdncoResults(ctx, rosterOverride) {
   return `
     <div class="flex justify-between items-center mb-3">
       <h3 class="font-semibold">ADNCO Roster — ${formatMonthYear(roster.month, roster.year)}</h3>
-      <div class="flex gap-2">
+      <div class="flex gap-2 flex-wrap">
+        <button class="btn btn-secondary btn-sm" data-action="adnco-export-excel">📗 Download Excel</button>
         <button class="btn btn-secondary btn-sm" data-action="adnco-print">📄 Print</button>
-        <button class="btn btn-secondary btn-sm" data-action="adnco-export-csv">📊 Export Roster CSV</button>
+        <button class="btn btn-secondary btn-sm" data-action="adnco-export-csv">📊 Export CSV</button>
       </div>
     </div>
     <div class="card mb-4"><h4 class="text-sm font-semibold text-muted mb-3">Visual Calendar — click a day to review positions</h4>
@@ -596,9 +598,9 @@ export function handleAdncoClick(action, el, ctx) {
     }
     case 'adnco-show-finalize':
       openModal('Finalize ADNCO Roster',
-        `<p class="text-sm text-muted mb-3">Saves to ADNCO history only — does not affect OOD personnel. Updates student last-duty dates in memory.</p>
-         <p class="text-sm text-muted mb-3">A <strong>printable ADNCO roster</strong> and <strong>updated student CSV</strong> open in new tabs (allow pop-ups). Save that CSV for next month&apos;s import.</p>
-         <p class="text-sm text-amber">Verify DNCO (LCpl), all 5 positions per night, and phone numbers before confirming.</p>`,
+        `<p class="text-sm text-muted mb-3">Saves to ADNCO history only — does not affect OOD personnel. Updates Academic student last-duty dates in memory.</p>
+         <p class="text-sm text-muted mb-3">A <strong>formatted Excel roster</strong> downloads automatically (MAT rows blank for platoon to fill in). An <strong>updated student CSV</strong> also opens — save that for next month&apos;s import.</p>
+         <p class="text-sm text-amber">Verify Academic assignments before confirming. MAT periods are intentionally left blank.</p>`,
         `<button class="btn btn-secondary" data-action="close-modal">Cancel</button>
          <button class="btn btn-primary" data-action="adnco-confirm-finalize">🔒 Confirm Finalize</button>`, 'sm');
       return true;
@@ -610,19 +612,27 @@ export function handleAdncoClick(action, el, ctx) {
       state.currentAdncoRoster = finalized;
       closeModal();
       persist();
-      const printed = openAdncoPrintout(finalized, state.adncoStudents, state.settings);
+      const excelDownloaded = downloadAdncoExcel(finalized, state.adncoStudents, state.settings);
       const studentExport = exportAdncoStudentsCSV(state.adncoStudents ?? []);
       const csvOpened = openCSVInNewTab(studentExport.content, studentExport.filename);
-      if (printed && csvOpened) {
-        toast('Finalized! ADNCO printout + student CSV opened in new tabs.');
-      } else if (printed) {
-        toast('Roster opened. Allow pop-ups for student CSV too.');
+      if (excelDownloaded && csvOpened) {
+        toast('Finalized! Excel roster downloaded + student CSV opened.');
+      } else if (excelDownloaded) {
+        toast('Finalized! Excel downloaded. Allow pop-ups for student CSV too.');
       } else if (csvOpened) {
-        toast('Student CSV opened. Allow pop-ups for printable roster.');
+        toast('Student CSV opened. Use Download Excel in the roster view if needed.');
       } else {
-        toast('Finalized! Allow pop-ups, then use Export buttons.');
+        toast('Finalized! Use Export buttons if downloads were blocked.');
       }
       render();
+      return true;
+    }
+    case 'adnco-export-excel': {
+      const roster = state.currentAdncoRoster ?? ui.viewingAdncoHistory;
+      if (roster) {
+        downloadAdncoExcel(roster, state.adncoStudents ?? [], state.settings);
+        toast('Excel roster downloaded');
+      }
       return true;
     }
     case 'adnco-print': {

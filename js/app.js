@@ -27,7 +27,7 @@ import {
 import { groupAdncoSlotsByDay } from './adncoRoster.js';
 import { normalizeStudentList } from './personnelUtils.js';
 
-export const APP_VERSION = '2026.06.28';
+export const APP_VERSION = '2026.06.29';
 
 // ─── State ───────────────────────────────────────────────────────────────────
 let state = {
@@ -832,11 +832,11 @@ function showHelpModal() {
        <p class="text-sm text-muted mt-1">Click calendar days to set hardship points and notes (96s, holidays). Finalizing permanently updates points and last duty dates. Use the personnel CSV backup workflow each month.</p></div>
 
      <h3 class="text-gold font-semibold mb-2 mt-4">🎓 ADNCO Student Duty (Generate ADNCOs)</h3>
-     <p class="text-sm text-muted mb-3">Separate student CSV backup — same monthly workflow as OOD. Duty changes at <strong>0630</strong> (Fri/Sun end at <strong>1630</strong>). Each period needs 5 positions: <strong>Bldg 827 (DNCO)</strong> (LCpl), Bldg 827 #2, 2× Bldg 829, Duty Driver (<strong>driversLicense Y</strong>).</p>
+     <p class="text-sm text-muted mb-3">Separate student CSV backup. <strong>Generate auto-fills Academic periods only</strong> — MAT platoon completes MAT rows in the Excel file after finalize. Each period needs 5 positions: Bldg 827 (DNCO, LCpl), Bldg 827 #2, 2× Bldg 829, Duty Driver (<strong>driversLicense Y</strong>).</p>
      <div class="card mb-3" style="padding:1rem"><strong>Monthly Workflow</strong>
-       <p class="text-sm text-muted mt-1">Export student CSV → edit <strong>nonAvailability</strong>, add/remove students, set <strong>driversLicense</strong> → import → calendar → generate → finalize (printout + new CSV open automatically).</p></div>
+       <p class="text-sm text-muted mt-1">Import student CSV → generate (Academic only) → finalize → <strong>Excel roster downloads</strong> (MAT rows blank) + student CSV. Send Excel to MAT platoon; save CSV for next month.</p></div>
      <div class="card mb-3" style="padding:1rem"><strong>Duty Windows</strong>
-       <p class="text-sm text-muted mt-1">Never-stood Marines are assigned first; then oldest <strong>lastDutyDate</strong>. Fri/Sun split unless the whole day is one type (then 0630→0630).</p></div>
+       <p class="text-sm text-muted mt-1">Academic fair rotation: never-stood first, then oldest <strong>lastDutyDate</strong>. Fri/Sun split unless the whole day is one type (then 0630→0630).</p></div>
      <div class="card" style="padding:1rem"><strong>✏ ADNCO Calendar</strong>
        <p class="text-sm text-muted mt-1">Click days to pre-assign, add notes, or override <strong>MAT ↔ Academic</strong> per period (e.g. 96 liberty). DNCO requires LCpl; driver requires license Y.</p></div>`,
     `<button class="btn btn-primary" data-action="close-modal" style="width:100%">Got It</button>`, 'lg');

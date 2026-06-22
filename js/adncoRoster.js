@@ -485,23 +485,24 @@ export function generateAdncoRoster(year, month, students, existingRoster, keepM
   const matPeriods = periodGroups.filter((p) => p.eligibleType === 'MAT').length;
   const acPeriods = periodGroups.filter((p) => p.eligibleType === 'Academic').length;
 
-  if (matPeriods && !resolved.some((p) => p.studentType === 'MAT')) {
-    warnings.push(`${matPeriods} MAT duty period(s) but no MAT students on roster.`);
-  }
   if (acPeriods && !resolved.some((p) => p.studentType === 'Academic')) {
     warnings.push(`${acPeriods} Academic duty period(s) but no Academic students on roster.`);
   }
-  if (matPeriods && !resolved.some((p) => p.studentType === 'MAT' && isLcplRank(p.rank))) {
-    warnings.push('MAT periods require LCpls for Bldg 827 (DNCO) — no MAT LCpls on roster.');
+  if (matPeriods && !resolved.some((p) => p.studentType === 'MAT')) {
+    warnings.push(`${matPeriods} MAT period(s) on calendar — no MAT students listed (platoon fills Excel manually).`);
   }
   if (acPeriods && !resolved.some((p) => p.studentType === 'Academic' && isLcplRank(p.rank))) {
     warnings.push('Academic periods require LCpls for Bldg 827 (DNCO) — no Academic LCpls on roster.');
   }
 
-  const periodKeys = shuffle(periodGroups.map((p) => periodKey(p.startDate, p.periodId)));
+  const academicPeriodKeys = shuffle(
+    periodGroups
+      .filter((p) => p.eligibleType === 'Academic')
+      .map((p) => periodKey(p.startDate, p.periodId))
+  );
   const result = slots.map((s) => ({ ...s }));
 
-  for (const key of periodKeys) {
+  for (const key of academicPeriodKeys) {
     const [startDate, periodId] = key.split('|');
     const assignedInPeriod = new Set(
       result
@@ -547,9 +548,15 @@ export function generateAdncoRoster(year, month, students, existingRoster, keepM
     createdAt: existingRoster?.createdAt ?? new Date().toISOString(),
   };
 
-  const unassigned = result.filter((s) => !s.personId).length;
-  if (unassigned) {
-    warnings.push(`${unassigned} position(s) still unassigned — add students or reduce non-availability.`);
+  const unassignedAcademic = result.filter((s) => s.eligibleType === 'Academic' && !s.personId).length;
+  const matOpen = result.filter((s) => s.eligibleType === 'MAT' && !s.personId).length;
+  if (unassignedAcademic) {
+    warnings.push(`${unassignedAcademic} Academic position(s) still unassigned — add Academic students or reduce non-availability.`);
+  }
+  if (matPeriods) {
+    warnings.push(`${matPeriods} MAT period(s) left blank — MAT platoon fills these in the Excel roster after finalize.`);
+  } else if (matOpen) {
+    warnings.push(`${matOpen} MAT position(s) open for manual assignment in Excel.`);
   }
 
   return { roster, warnings };
