@@ -27,7 +27,7 @@ import {
 import { groupAdncoSlotsByDay } from './adncoRoster.js';
 import { normalizeStudentList } from './personnelUtils.js';
 
-export const APP_VERSION = '2026.07.11';
+export const APP_VERSION = '2026.07.12';
 
 // ─── State ───────────────────────────────────────────────────────────────────
 let state = {
@@ -340,7 +340,24 @@ function renderGenerate() {
   return html;
 }
 
-function renderCalendar(slots, showAssignments) {
+function renderCalendarSupersFooter(roster) {
+  const map = personMap();
+  const lines = roster.supernumeraries.map((sup) => {
+    const range = getHalfDateRange(roster.year, roster.month, sup.half, state.settings.halfSplitDay);
+    const person = sup.personId ? map.get(sup.personId) : null;
+    const halfLabel = sup.half === 'first' ? '1st Half' : '2nd Half';
+    const assignee = person
+      ? `${esc(person.rank)} ${esc(person.name.split(',')[0])}`
+      : '<span class="text-amber">Unfilled</span>';
+    return `<div class="cal-supers-line"><strong>${halfLabel}</strong> (${formatShortDate(range.start)} – ${formatShortDate(range.end)}): ${assignee}</div>`;
+  }).join('');
+  return `<div class="cal-supers">
+    <div class="cal-supers-title">★ Supernumeraries</div>
+    ${lines}
+  </div>`;
+}
+
+function renderCalendar(slots, showAssignments, roster) {
   const maxPts = Math.max(...slots.map((s) => s.points), 10);
   const offset = getCalendarGridOffset(ui.genYear, ui.genMonth);
   const map = personMap();
@@ -373,6 +390,7 @@ function renderCalendar(slots, showAssignments) {
         </button>`;
       }).join('')}
     </div>
+    ${showAssignments && roster ? renderCalendarSupersFooter(roster) : ''}
     ${showAssignments ? '' : `<div class="cal-legend">
       <span><span class="legend-dot" style="background:rgba(74,222,128,0.3);border:1px solid rgba(74,222,128,0.5)"></span>Low pts (desirable)</span>
       <span><span class="legend-dot" style="background:rgba(248,113,113,0.3);border:1px solid rgba(248,113,113,0.5)"></span>High pts (hardship)</span>
@@ -413,7 +431,7 @@ function renderRosterResults(roster, readOnly) {
         <h4 class="text-sm font-semibold text-muted">Visual Calendar</h4>
         <button class="btn btn-secondary btn-sm" data-action="print-ood-calendar">🖨 Print Calendar</button>
       </div>
-      ${renderCalendar(roster.slots, true)}</div>
+      ${renderCalendar(roster.slots, true, roster)}</div>
     <div class="card"><h4 class="text-sm font-semibold text-muted mb-3">Point Distribution Preview</h4>
       <div class="table-wrap"><table class="data"><thead><tr><th>Person</th><th>Current</th><th>Projected</th><th>Duties</th><th>Super</th></tr></thead><tbody>
         ${dist.map((d)=>`<tr><td>${esc(d.rank)} ${esc(d.name)}</td><td class="font-mono text-dim">${d.currentPoints}</td>

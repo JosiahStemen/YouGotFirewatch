@@ -162,6 +162,9 @@ body {
 .cal-grid--roster .cal-day { min-height: 5.5rem; aspect-ratio: auto; }
 .cal-grid--roster .cal-day-num { font-size: 0.875rem; }
 .cal-day-person--assigned { font-size: 0.8125rem; line-height: 1.2; color: var(--gold-400); font-weight: 600; }
+.cal-supers { margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid rgba(201,162,39,0.35); }
+.cal-supers-title { font-size: 0.8125rem; font-weight: 600; color: var(--gold-400); margin-bottom: 0.5rem; }
+.cal-supers-line { font-size: 0.8125rem; margin-bottom: 0.25rem; }
 .cal-legend { display: flex; gap: 1rem; font-size: 0.75rem; color: var(--text-dim); margin-top: 0.75rem; flex-wrap: wrap; }
 .legend-dot { display: inline-block; width: 0.75rem; height: 0.75rem; border-radius: 2px; margin-right: 0.25rem; vertical-align: middle; }
 
