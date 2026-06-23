@@ -8,11 +8,44 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>YouGotFireWatch — Fire Watch Roster Generator</title>
-  <link rel="stylesheet" href="css/style.css?v=20260713">
+  <link rel="stylesheet" href="css/style.css?v=20260714">
 </head>
 <body>
-  <div id="app">Loading YouGotFireWatch...</div>
-  <script src="js/vendor/xlsx.full.min.js?v=20260713"></script>
-  <script type="module" src="js/app.js?v=20260713"></script>
+  <div id="app">
+    <p>Loading YouGotFireWatch...</p>
+    <p id="boot-hint" style="font-size:0.85rem;color:#888;margin-top:0.75rem">On NIPR, first load can take a few seconds. Hard refresh: Ctrl+Shift+R.</p>
+  </div>
+  <script type="module">
+    const app = document.getElementById('app');
+    const showBootError = (title, detail, tips) => {
+      app.innerHTML = `<div style="padding:2rem;font-family:system-ui,sans-serif;max-width:40rem;color:#1a2332">
+        <h2 style="margin:0 0 0.75rem">${title}</h2>
+        <p style="color:#666;font-size:0.9rem">${detail}</p>
+        <ul style="font-size:0.9rem;line-height:1.5">${tips.map((t) => `<li>${t}</li>`).join('')}</ul>
+      </div>`;
+    };
+    const timer = setTimeout(() => {
+      if (!window.__ygfwReady) {
+        showBootError('Still loading…',
+          'The app is taking longer than usual. NIPR proxies often cache an old broken copy of the site.',
+          ['Hard refresh: <strong>Ctrl+Shift+R</strong>',
+           'Try a private/incognito window',
+           'Confirm the footer shows <strong>v2026.07.14</strong> once it loads',
+           'If github.io is blocked, use a local copy from shared drive (ask your admin)']);
+      }
+    }, 12000);
+    try {
+      await import('./js/app.js?v=20260714');
+      window.__ygfwReady = true;
+      clearTimeout(timer);
+    } catch (err) {
+      clearTimeout(timer);
+      showBootError('YouGotFireWatch failed to load',
+        (err && err.message) ? err.message : String(err),
+        ['Hard refresh: <strong>Ctrl+Shift+R</strong>',
+         'NIPR may block or cache <strong>github.io</strong> — check browser DevTools (F12) → Console',
+         'OOD tab does not need Excel; ADNCO Excel loads only when you export']);
+    }
+  </script>
 </body>
 </html>

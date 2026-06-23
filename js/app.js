@@ -23,11 +23,11 @@ import {
 import {
   renderAdncoTab, renderAdncoResults, handleAdncoClick, handleAdncoChange,
   handleAdncoInput, handleAdncoSubmit, createAdncoUiDefaults, initAdncoSlots,
-} from './adncoTab.js?v=20260713';
+} from './adncoTab.js';
 import { groupAdncoSlotsByDay } from './adncoRoster.js';
 import { normalizeStudentList } from './personnelUtils.js';
 
-export const APP_VERSION = '2026.07.13';
+export const APP_VERSION = '2026.07.14';
 
 // ─── State ───────────────────────────────────────────────────────────────────
 let state = {
@@ -884,4 +884,17 @@ function triggerFileImport(accept, callback) {
 }
 
 // ─── Boot ────────────────────────────────────────────────────────────────────
-init();
+try {
+  init();
+  window.__ygfwReady = true;
+} catch (err) {
+  console.error(err);
+  const app = document.getElementById('app');
+  if (app) {
+    app.innerHTML = `<div style="padding:2rem;font-family:system-ui,sans-serif;max-width:40rem">
+      <h2>YouGotFireWatch startup error</h2>
+      <p style="color:#666">${esc(String(err?.message || err))}</p>
+      <p style="font-size:0.9rem">Try Ctrl+Shift+R. On NIPR, cached scripts are a common cause.</p>
+    </div>`;
+  }
+}

@@ -2,7 +2,7 @@ import { formatMonthYear } from './dateUtils.js';
 import { groupAdncoSlotsByDay, ADNCO_POSITIONS } from './adncoRoster.js';
 
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-const EXPORT_BUILD = '20260713';
+const EXPORT_BUILD = '20260714';
 const MAT_PLACEHOLDER = 'MAT';
 
 /** Mirrors openAdncoPrintout() CSS — keep in sync when changing print layout. */
@@ -125,16 +125,32 @@ function ensureStyledXlsxLib(XLSX) {
   }
 }
 
+let xlsxScriptPromise = null;
+
+function loadXlsxScript() {
+  const existing = getXlsxLibOrNull();
+  if (existing) return Promise.resolve(existing);
+  if (xlsxScriptPromise) return xlsxScriptPromise;
+  xlsxScriptPromise = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'js/vendor/xlsx.full.min.js?v=20260714';
+    script.onload = () => {
+      const lib = getXlsxLibOrNull();
+      if (lib) resolve(lib);
+      else reject(new Error('Excel library loaded but XLSX global is missing.'));
+    };
+    script.onerror = () => reject(new Error(
+      'Excel library blocked or failed to download. OOD tab still works; only ADNCO Excel export needs this file.'
+    ));
+    document.head.appendChild(script);
+  });
+  return xlsxScriptPromise;
+}
+
 async function waitForXlsxLib() {
-  for (let i = 0; i < 80; i++) {
-    const lib = getXlsxLibOrNull();
-    if (lib) {
-      ensureStyledXlsxLib(lib);
-      return lib;
-    }
-    await new Promise((r) => setTimeout(r, 50));
-  }
-  throw new Error('Excel library failed to load. Check your connection, hard refresh (Ctrl+Shift+R), and try again.');
+  const lib = await loadXlsxScript();
+  ensureStyledXlsxLib(lib);
+  return lib;
 }
 
 function byteLen(data) {
