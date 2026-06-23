@@ -23,11 +23,11 @@ import {
 import {
   renderAdncoTab, renderAdncoResults, handleAdncoClick, handleAdncoChange,
   handleAdncoInput, handleAdncoSubmit, createAdncoUiDefaults, initAdncoSlots,
-} from './adncoTab.js?v=20260708';
+} from './adncoTab.js?v=20260713';
 import { groupAdncoSlotsByDay } from './adncoRoster.js';
 import { normalizeStudentList } from './personnelUtils.js';
 
-export const APP_VERSION = '2026.07.12';
+export const APP_VERSION = '2026.07.13';
 
 // ─── State ───────────────────────────────────────────────────────────────────
 let state = {
@@ -396,6 +396,7 @@ function renderCalendar(slots, showAssignments, roster) {
       <span><span class="legend-dot" style="background:rgba(248,113,113,0.3);border:1px solid rgba(248,113,113,0.5)"></span>High pts (hardship)</span>
       <span>${slots.length} days — full coverage required</span>
     </div>`}
+  `;
 }
 
 function renderRosterResults(roster, readOnly) {
