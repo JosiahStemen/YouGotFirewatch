@@ -12,7 +12,7 @@ import {
   countDutyEligiblePersonnel,
 } from './rosterGenerator.js';
 import {
-  exportRosterCSV, openCSVInNewTab, openFinalizePrintout, printRosterPDF,
+  exportRosterCSV, openCSVInNewTab, openFinalizePrintout, printRosterPDF, openOodCalendarPrintout,
 } from './export.js';
 import {
   exportPersonnelBackup, parsePersonnelBackupCSV, getPersonnelBackupTemplate,
@@ -27,7 +27,7 @@ import {
 import { groupAdncoSlotsByDay } from './adncoRoster.js';
 import { normalizeStudentList } from './personnelUtils.js';
 
-export const APP_VERSION = '2026.07.10';
+export const APP_VERSION = '2026.07.11';
 
 // ─── State ───────────────────────────────────────────────────────────────────
 let state = {
@@ -358,7 +358,7 @@ function renderCalendar(slots, showAssignments) {
       ${[{key:'weekday',label:'M–Thu'},{key:'friday',label:'Friday'},{key:'saturday',label:'Saturday'},{key:'sunday',label:'Sunday'},{key:'holiday',label:'Holiday'}].map(({key,label})=>`<div><label class="label">${label}</label>
         <input class="input" type="number" step="0.5" data-action="set-baseline" data-key="${key}" value="${state.settings.baselines[key]}" min="0"></div>`).join('')}
     </div>` : ''}
-    <div class="cal-grid">
+    <div class="cal-grid${showAssignments ? ' cal-grid--roster' : ''}">
       ${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((d)=>`<div class="cal-dow">${d}</div>`).join('')}
       ${cells.map((slot) => {
         if (!slot) return '<div class="cal-day empty"></div>';
@@ -366,18 +366,18 @@ function renderCalendar(slots, showAssignments) {
         const holiday = getHolidayName(slot.date);
         const assigned = showAssignments && slot.personId ? map.get(slot.personId) : null;
         return `<button class="cal-day ${slot.note?'has-note':''} ${assigned?'assigned':''}" data-action="edit-day" data-date="${slot.date}" ${showAssignments?'disabled style="cursor:default"':''}>
-          <div class="flex justify-between"><span class="cal-day-num">${dayNum}</span>${ptsBadge(slot.points, maxPts)}</div>
-          ${holiday ? `<span class="text-xs text-gold" style="font-size:0.6rem">${holiday}</span>` : ''}
-          ${slot.note && !holiday ? `<span class="cal-day-note">${esc(slot.note)}</span>` : ''}
-          ${assigned ? `<span class="cal-day-person">${esc(assigned.rank)} ${esc(assigned.name.split(',')[0])}</span>` : ''}
+          <div class="flex justify-between"><span class="cal-day-num">${dayNum}</span>${showAssignments ? '' : ptsBadge(slot.points, maxPts)}</div>
+          ${holiday ? `<span class="text-xs text-gold" style="font-size:${showAssignments?'0.65rem':'0.6rem'}">${holiday}</span>` : ''}
+          ${slot.note && !holiday && !showAssignments ? `<span class="cal-day-note">${esc(slot.note)}</span>` : ''}
+          ${assigned ? `<span class="cal-day-person cal-day-person--assigned">${esc(assigned.rank)} ${esc(assigned.name.split(',')[0])}</span>` : ''}
         </button>`;
       }).join('')}
     </div>
-    <div class="cal-legend">
+    ${showAssignments ? '' : `<div class="cal-legend">
       <span><span class="legend-dot" style="background:rgba(74,222,128,0.3);border:1px solid rgba(74,222,128,0.5)"></span>Low pts (desirable)</span>
       <span><span class="legend-dot" style="background:rgba(248,113,113,0.3);border:1px solid rgba(248,113,113,0.5)"></span>High pts (hardship)</span>
       <span>${slots.length} days — full coverage required</span>
-    </div>`;
+    </div>`}
 }
 
 function renderRosterResults(roster, readOnly) {
@@ -408,7 +408,11 @@ function renderRosterResults(roster, readOnly) {
         }).join('')}
       </tbody></table></div>
     </div>
-    <div class="card"><h4 class="text-sm font-semibold text-muted mb-3">Visual Calendar</h4>
+    <div class="card">
+      <div class="flex justify-between items-center mb-3">
+        <h4 class="text-sm font-semibold text-muted">Visual Calendar</h4>
+        <button class="btn btn-secondary btn-sm" data-action="print-ood-calendar">🖨 Print Calendar</button>
+      </div>
       ${renderCalendar(roster.slots, true)}</div>
     <div class="card"><h4 class="text-sm font-semibold text-muted mb-3">Point Distribution Preview</h4>
       <div class="table-wrap"><table class="data"><thead><tr><th>Person</th><th>Current</th><th>Projected</th><th>Duties</th><th>Super</th></tr></thead><tbody>
@@ -601,6 +605,11 @@ function handleClick(e) {
     case 'show-finalize': showFinalizeModal(); break;
     case 'confirm-finalize': doFinalize(); break;
     case 'export-pdf': if (state.currentRoster) printRosterPDF(state.currentRoster, state.personnel, state.settings); break;
+    case 'print-ood-calendar': {
+      const roster = state.currentRoster || ui.viewingHistory;
+      if (roster) openOodCalendarPrintout(roster, state.personnel, state.settings);
+      break;
+    }
     case 'export-csv': if (state.currentRoster) openCSVInNewTab(exportRosterCSV(state.currentRoster, state.personnel, state.settings), `YouGotFireWatch-Detail-${ui.genYear}-${String(ui.genMonth).padStart(2,'0')}.csv`); break;
     case 'back-history': ui.viewingHistory = null; ui.viewingAdncoHistory = null; render(); break;
     case 'view-history':

@@ -2,7 +2,7 @@ import { formatMonthYear } from './dateUtils.js';
 import { groupAdncoSlotsByDay, ADNCO_POSITIONS } from './adncoRoster.js';
 
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-const EXPORT_BUILD = '20260710';
+const EXPORT_BUILD = '20260711';
 const MAT_PLACEHOLDER = 'MAT';
 
 /** Mirrors openAdncoPrintout() CSS — keep in sync when changing print layout. */

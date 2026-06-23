@@ -158,6 +158,10 @@ body {
 .cal-day-num { font-weight: 500; }
 .cal-day-note { font-size: 0.625rem; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: auto; }
 .cal-day-person { font-size: 0.625rem; color: rgba(201,162,39,0.8); margin-top: auto; font-weight: 500; }
+.cal-grid--roster { gap: 6px; }
+.cal-grid--roster .cal-day { min-height: 5.5rem; aspect-ratio: auto; }
+.cal-grid--roster .cal-day-num { font-size: 0.875rem; }
+.cal-day-person--assigned { font-size: 0.8125rem; line-height: 1.2; color: var(--gold-400); font-weight: 600; }
 .cal-legend { display: flex; gap: 1rem; font-size: 0.75rem; color: var(--text-dim); margin-top: 0.75rem; flex-wrap: wrap; }
 .legend-dot { display: inline-block; width: 0.75rem; height: 0.75rem; border-radius: 2px; margin-right: 0.25rem; vertical-align: middle; }
 

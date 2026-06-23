@@ -1,4 +1,5 @@
-import { formatMonthYear, formatDisplayDate, getHalfDateRange } from './dateUtils.js';
+import { formatMonthYear, formatDisplayDate, getHalfDateRange, getCalendarGridOffset } from './dateUtils.js';
+import { getHolidayName } from './holidays.js';
 import { exportPersonnelBackup } from './personnelBackup.js';
 
 export function exportRosterCSV(roster, personnel, settings) {
@@ -167,6 +168,104 @@ ${roster.finalizedAt ? `<p style="font-size:12px;color:#888;margin-bottom:16px">
 
 function formatShortDate(iso) {
   return new Date(iso + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+/**
+ * Opens a new tab with a large month-grid calendar for wall posting.
+ * Auto-triggers the browser print dialog (landscape recommended).
+ */
+export function openOodCalendarPrintout(roster, personnel, settings) {
+  const monthLabel = formatMonthYear(roster.month, roster.year);
+  const personMap = new Map(personnel.map((p) => [p.id, p]));
+  const offset = getCalendarGridOffset(roster.year, roster.month);
+  const sorted = [...roster.slots].sort((a, b) => a.date.localeCompare(b.date));
+  const cells = [...Array(offset).fill(null), ...sorted];
+  while (cells.length % 7) cells.push(null);
+
+  const gridCells = cells.map((slot) => {
+    if (!slot) return '<div class="day empty"></div>';
+    const dayNum = parseInt(slot.date.split('-')[2], 10);
+    const holiday = getHolidayName(slot.date);
+    const person = slot.personId ? personMap.get(slot.personId) : null;
+    const assignee = person ? formatRankLastName(person) : 'Unassigned';
+    const note = slot.note && !holiday ? `<div class="note">${slot.note}</div>` : '';
+    const hol = holiday ? `<div class="holiday">${holiday}</div>` : '';
+    return `<div class="day${person ? ' filled' : ''}">
+      <div class="num">${dayNum}</div>
+      ${hol}
+      <div class="assignee">${assignee}</div>
+      ${note}
+    </div>`;
+  }).join('');
+
+  const superLines = roster.supernumeraries.map((sup) => {
+    const person = sup.personId ? personMap.get(sup.personId) : null;
+    const range = getHalfDateRange(roster.year, roster.month, sup.half, settings.halfSplitDay);
+    const half = sup.half === 'first' ? '1st Half' : '2nd Half';
+    const label = person ? formatRankLastName(person) : 'Unfilled';
+    return `<div class="super"><strong>${half}</strong> (${formatShortDate(range.start)} – ${formatShortDate(range.end)}): ${label}</div>`;
+  }).join('');
+
+  const finalized = roster.finalizedAt
+    ? `<p class="meta">Finalized ${formatDisplayDate(roster.finalizedAt.split('T')[0])}</p>` : '';
+
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
+<title>${settings.unitName} — ${monthLabel} OOD Calendar</title>
+<style>
+  * { box-sizing: border-box; }
+  @page { size: landscape; margin: 0.4in; }
+  body { font-family: Arial, Helvetica, sans-serif; margin: 0; padding: 0.5in; color: #1a2332; }
+  h1 { font-size: 1.6rem; margin: 0 0 2px; letter-spacing: 0.02em; }
+  h2 { font-size: 1.15rem; font-weight: normal; color: #444; margin: 0 0 6px; }
+  .meta { font-size: 0.75rem; color: #777; margin: 0 0 12px; }
+  .grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+  .dow { text-align: center; font-size: 0.85rem; font-weight: 700; color: #1a2332;
+    background: #1a2332; color: #c9a227; padding: 6px 4px; border-radius: 3px; }
+  .day { border: 2px solid #1a2332; border-radius: 4px; min-height: 1.35in;
+    padding: 6px 8px; display: flex; flex-direction: column; background: #fff; }
+  .day.empty { visibility: hidden; border: none; }
+  .day.filled { background: #faf8f0; }
+  .num { font-size: 1.1rem; font-weight: 700; line-height: 1; margin-bottom: 4px; }
+  .assignee { font-size: 0.95rem; font-weight: 700; line-height: 1.15; margin-top: auto;
+    color: #1a2332; word-break: break-word; }
+  .holiday { font-size: 0.6rem; font-weight: 600; color: #b8941f; margin-bottom: 2px; }
+  .note { font-size: 0.55rem; color: #666; margin-top: 2px; }
+  .supers { margin-top: 14px; padding-top: 10px; border-top: 2px solid #c9a227; }
+  .supers h3 { font-size: 0.85rem; margin: 0 0 6px; color: #1a2332; }
+  .super { font-size: 0.8rem; margin-bottom: 3px; }
+  .footer { margin-top: 10px; font-size: 0.6rem; color: #999; text-align: center; }
+  .no-print { margin-bottom: 14px; padding: 10px 12px; background: #f0f4f8; border-radius: 6px; font-size: 0.8rem; }
+  .no-print button { padding: 8px 16px; background: #b8941f; color: #0a0f1a; border: none;
+    border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.8rem; }
+  @media print {
+    .no-print { display: none !important; }
+    body { padding: 0; }
+    .day { min-height: 1.2in; }
+  }
+</style></head><body>
+<div class="no-print">
+  <strong>Wall calendar ready.</strong> Use landscape orientation for best results. Close this tab when done.
+  <br><br><button onclick="window.print()">🖨 Print Calendar</button>
+</div>
+<h1>${settings.unitName}</h1>
+<h2>OOD Calendar — ${monthLabel}</h2>
+${finalized}
+<div class="grid">
+  ${['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].map((d) => `<div class="dow">${d}</div>`).join('')}
+  ${gridCells}
+</div>
+<div class="supers">
+  <h3>★ Supernumeraries</h3>
+  ${superLines}
+</div>
+<p class="footer">YouGotFireWatch — ${settings.unitName}</p>
+<script>setTimeout(() => window.print(), 400);</script>
+</body></html>`;
+
+  const win = window.open('', '_blank');
+  if (win) { win.document.write(html); win.document.close(); return true; }
+  alert('Pop-up blocked. Allow pop-ups to print the calendar.');
+  return false;
 }
 
 export function printRosterPDF(roster, personnel, settings) {
